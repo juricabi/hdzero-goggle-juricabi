@@ -44,7 +44,7 @@ int gpdac0_get() {
 #endif
 
     sprintf(buf, "awr 0x05070080 > %s", ADC0_FILE);
-    system(buf);
+    system_exec_sunxi_dump(buf); // under the sunxi_dump lock, without a log line (polled)
     usleep(10 * 1000); // 10ms
 
     FILE *file;

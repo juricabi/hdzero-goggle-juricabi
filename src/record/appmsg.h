@@ -46,6 +46,13 @@ typedef enum {
 	AIO_cmdBUTT,
 } RecordMsgCommand_e;
 
+/* HDMIA_LOCK_FILE  flock() around every /sys/class/sunxi_dump access (one address latch for all
+ *                  processes): the app's aww / awr calls (system_exec_sunxi_dump()), the module bay
+ *                  (src/module/module.c) and utilities/probe take it (src/record/soc_reg.h). */
+#ifndef HDMIA_LOCK_FILE /* host tests put it elsewhere */
+#define HDMIA_LOCK_FILE "/tmp/.sunxi_dump.lock"
+#endif
+
 /** @} */
 
 #if defined (__cplusplus)
