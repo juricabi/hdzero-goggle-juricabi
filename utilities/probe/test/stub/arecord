@@ -1,0 +1,6 @@
+#!/bin/sh
+echo "stub arecord $*"
+case "$*" in "-l" | "-L") exit 0 ;; esac
+for a in "$@"; do w=$a; done
+busybox dd if=/dev/zero of="$w" bs=44 count=1 2> /dev/null
+exec busybox sleep "${STUB_APLAY_S:-1}"

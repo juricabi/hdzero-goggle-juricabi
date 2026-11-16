@@ -1,0 +1,18 @@
+#!/bin/sh
+# stub of /mnt/app/services/busybox/busybox (the services package's BusyBox 1.27.2, the one with
+# devmem; run_tests.sh puts a wrapper there): "--list", and "devmem ADDRESS 32" read only,
+# answered from the register model as the real applet prints it ("0x%08X"). Every call is logged
+# in $MODEL/services_busybox; a devmem write (a value argument) or any other use is a violation.
+. "$(dirname "$0")/model.sh"
+echo "$*" >> "$M/services_busybox"
+if [ "$*" = --list ]; then
+    printf 'ash\ncat\ndevmem\nls\nsh\n'
+    exit 0
+fi
+if [ "$1" = devmem ] && [ "$#" -eq 3 ] && [ "$3" = 32 ]; then
+    soc_apply_write
+    printf '0x%08X\n' "$(kv_get "$M/soc" "$(n32 "$2")" 0)"
+    exit 0
+fi
+viol "services busybox called as: $*"
+exit 1

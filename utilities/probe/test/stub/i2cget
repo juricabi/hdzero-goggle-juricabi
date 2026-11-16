@@ -1,0 +1,16 @@
+#!/bin/sh
+. "$(dirname "$0")/model.sh"
+[ "$1" = -y ] && shift
+bus=$1
+addr=$(n8 "$2")
+reg=$(n8 "$3")
+busybox usleep "${STUB_I2C_US:-3000}"
+if i2c_absent "$bus" "$addr"; then
+    echo "Error: Read failed" >&2
+    exit 1
+fi
+case "$addr" in 0x4c | 0x49) app_unstopped && [ "$reg" = 0x0f ] && viol "i2cget $bus $addr 0x0f while the app runs" ;; esac
+k=$(i2c_key "$bus" "$addr" "$reg")
+echo "R $bus $addr $k" >> "$M/i2c_reads"
+n8 "$(kv_get "$(i2c_file "$bus" "$addr")" "$k" 0)"
+echo

@@ -1,0 +1,5 @@
+#!/bin/sh
+. "$(dirname "$0")/model.sh"
+outside_window dmesg "$@"
+echo "[1.0] sunxi-daudio 5090000.daudio: stub"
+echo "[1.1] pinctrl: pin PH1 already requested"

@@ -1,0 +1,6 @@
+#!/bin/sh
+. "$(dirname "$0")/model.sh"
+outside_window amixer "$@"
+echo "stub amixer $*"
+[ "$1 $2 $3" = "-c ${STUB_HANG_CARD:-x} contents" ] && { trap '' TERM; while :; do busybox sleep 1; done; }
+exit 0
