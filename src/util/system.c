@@ -1,14 +1,25 @@
 #include "system.h"
 
 #include <libgen.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "log/log.h"
+#include "record/soc_reg.h"
 #include "util/filesystem.h"
 
+// aww / awr read through the one address latch of /sys/class/sunxi_dump (aww reads back what
+// it wrote): they run under the lock every user of it takes (system_exec_sunxi_dump()).
+static int is_sunxi_dump_command(const char *command) {
+    return strncmp(command, "aww ", 4) == 0 || strncmp(command, "awr ", 4) == 0;
+}
+
 int system_exec(const char *command) {
+    if (is_sunxi_dump_command(command))
+        return system_exec_sunxi_dump(command);
     LOGI("System Execute: %s", command);
 #ifdef EMULATOR_BUILD
     // The emulator stands in for the goggle hardware, not the host OS. These
@@ -22,6 +33,45 @@ int system_exec(const char *command) {
     return 0;
 #else
     return system(command);
+#endif
+}
+
+#ifndef EMULATOR_BUILD
+static uint32_t system_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)(ts.tv_sec * 1000u + ts.tv_nsec / 1000000u);
+}
+#endif
+
+int system_exec_sunxi_dump(const char *command) {
+    const int quiet = strncmp(command, "awr ", 4) == 0;
+    if (!quiet)
+        LOGI("System Execute: %s", command);
+#ifdef EMULATOR_BUILD
+    if (!quiet)
+        LOGI("  [emulator] not executed (host-safe no-op)");
+    return 0;
+#else
+    static uint32_t last_timeout_ms = 0; // when the lock last could not be taken within 1 s
+    static int timed_out = 0;
+    const int recent = __atomic_load_n(&timed_out, __ATOMIC_RELAXED) &&
+                       (uint32_t)(system_now_ms() - __atomic_load_n(&last_timeout_ms, __ATOMIC_RELAXED)) < 10000u;
+    const int fd = soc_reg_lock_n(recent ? 1 : SOC_REG_LOCK_TRIES);
+    if (fd < 0) {
+        if (!recent) { // logged once per 10 s window, not at every polled read
+            __atomic_store_n(&last_timeout_ms, system_now_ms(), __ATOMIC_RELAXED);
+            __atomic_store_n(&timed_out, 1, __ATOMIC_RELAXED);
+            LOGW("sunxi_dump lock not available within 1 s: '%s' runs without it (as stock); "
+                 "for 10 s the lock is tried once per command",
+                 command);
+        }
+    } else {
+        __atomic_store_n(&timed_out, 0, __ATOMIC_RELAXED);
+    }
+    const int r = system(command);
+    soc_reg_unlock(fd);
+    return r;
 #endif
 }
 

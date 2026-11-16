@@ -118,6 +118,8 @@ file(GLOB SRC_FILES_PLAYER "src/player/*.c" "src/player/*.h")
 file(GLOB SRC_FILES_EMULATOR "src/emulator/*.c" "src/emulator/*.h")
 file(GLOB SRC_FILES_LANG "src/lang/*.c" "src/lang/*.h")
 file(GLOB SRC_FILES_PLATFORM "src/platform/*.c" "src/platform/*.h")
+# the lock around /sys/class/sunxi_dump, shared with the record daemon (src/record/soc_reg.h)
+set(SRC_FILES_SOC_REG src/record/soc_reg.c)
 
 # Per-target driver swaps: the emulator provides its own implementations of certain
 # hardware drivers (src/emulator/*), so drop the goggle versions to avoid duplicate
@@ -154,6 +156,7 @@ set(SRC_FILES
 	${SRC_FILES_UTIL}
 	${SRC_FILES_LANG}
 	${SRC_FILES_PLATFORM}
+	${SRC_FILES_SOC_REG}
 )
 
 if(EMULATOR_BUILD)
