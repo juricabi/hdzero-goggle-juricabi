@@ -107,7 +107,7 @@ endif()
 # These GLOBs are resolved at configure time, so a build tree configured
 # before a source file was added will not see it (undefined references at
 # link). Touching this file forces existing trees to re-run cmake on the
-# next make. (Last touched for: src/record/rolling.c)
+# next make. (Last touched for: src/module)
 file(GLOB SRC_FILES_CORE   "src/core/*.c" "src/core/*.h")
 file(GLOB SRC_FILES_DRIVER "src/driver/*.c" "src/driver/*.h")
 file(GLOB SRC_FILES_FONTS  "src/fonts/*.c" "src/fonts/*.h")
@@ -118,6 +118,8 @@ file(GLOB SRC_FILES_PLAYER "src/player/*.c" "src/player/*.h")
 file(GLOB SRC_FILES_EMULATOR "src/emulator/*.c" "src/emulator/*.h")
 file(GLOB SRC_FILES_LANG "src/lang/*.c" "src/lang/*.h")
 file(GLOB SRC_FILES_PLATFORM "src/platform/*.c" "src/platform/*.h")
+# module bay control (src/module/module.h)
+file(GLOB SRC_FILES_MODULE "src/module/*.c" "src/module/*.h")
 # the lock around /sys/class/sunxi_dump, shared with the record daemon (src/record/soc_reg.h)
 set(SRC_FILES_SOC_REG src/record/soc_reg.c)
 
@@ -156,6 +158,7 @@ set(SRC_FILES
 	${SRC_FILES_UTIL}
 	${SRC_FILES_LANG}
 	${SRC_FILES_PLATFORM}
+	${SRC_FILES_MODULE}
 	${SRC_FILES_SOC_REG}
 )
 

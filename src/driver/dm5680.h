@@ -7,6 +7,7 @@ extern "C" {
 #include "dm6302.h"
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct {
@@ -40,7 +41,10 @@ void DM5680_SetFPS(uint8_t fps);
 void DM5680_SetBB(uint8_t on);
 void DM5680_ResetHDMI_RX(uint8_t on);
 void DM5680_ResetHDMI_TX(uint8_t on);
-void DM5680_ExternalAnalog_Power(uint8_t on);
+void DM5680_ExternalAnalog_Power(uint8_t on); // 0: bay on, 1: off (reported to src/module)
+// Module bay (SteadyView mode set): when the bay is on, switches it off for 70 ms, calls
+// while_off() at the end of that and switches it on again.  False (nothing done): bay off.
+bool DM5680_ExternalAnalog_PowerCycle(void (*while_off)(void));
 void DM5680_InternalAnalog_Power(uint8_t on);
 void DM5680_ResetRF(uint8_t on);
 void DM5680_SetBR(uint8_t on);

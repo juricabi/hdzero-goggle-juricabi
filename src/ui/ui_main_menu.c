@@ -24,6 +24,7 @@
 #include "ui/page_headtracker.h"
 #include "ui/page_imagesettings.h"
 #include "ui/page_input.h"
+#include "ui/page_modulebay.h"
 #include "ui/page_osd.h"
 #include "ui/page_playback.h"
 #include "ui/page_power.h"
@@ -50,7 +51,7 @@ static lv_obj_t *root_page;
  * To contain all menu pages.
  */
 
-#define PAGE_PACK_MAX_NUM 20
+#define PAGE_PACK_MAX_NUM 21 // Goggle 2: 20 pages + Module Bay
 
 static page_pack_t *page_packs[PAGE_PACK_MAX_NUM];
 static size_t page_packs_count = 0;
@@ -337,6 +338,11 @@ void main_menu_init(void) {
     page_packs[page_packs_count++] = &pp_input;
 #if defined(HDZBOXPRO) || defined(HDZGOGGLE2)
     page_packs[page_packs_count++] = &pp_analog_rssi;
+#endif
+#if defined(HDZGOGGLE) || defined(HDZGOGGLE2)
+    // module bay control: after every other entry (which keep their places), right before
+    // the last one
+    page_packs[page_packs_count++] = &pp_modulebay;
 #endif
     page_packs[page_packs_count++] = &pp_sleep;
 

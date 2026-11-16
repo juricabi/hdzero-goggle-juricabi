@@ -294,6 +294,11 @@ const setting_t g_setting_defaults = {
         .calib_max = 2100,
     },
     .has_all_features = true,
+    .module = {
+        .type = 0, // None: the goggle never touches the bay pins
+        .setting = 0,
+        .channel = 33, // R1
+    },
 };
 
 setting_image_video_t *settings_image_video(setting_image_source_t source) {
@@ -710,6 +715,19 @@ void settings_load(void) {
     // language
     if (!language_config()) {
         g_setting.language.lang = ini_getl("language", "lang", g_setting_defaults.language.lang, SETTING_INI);
+    }
+
+    // module bay
+    // (type: 0 None, 1 Switch, 2 rapidFIRE, 3 Steadyview, 4 Steadyview-X, module_type_t; any other value
+    // is None, checked before it is narrowed to int.)
+    const long module_type = ini_getl("module", "type", g_setting_defaults.module.type, SETTING_INI);
+    g_setting.module.type = module_type >= 0 && module_type <= 4 ? (int)module_type : g_setting_defaults.module.type;
+    g_setting.module.setting = ini_getl("module", "setting", g_setting_defaults.module.setting, SETTING_INI);
+    // Goggle 2: the bay module's own channel, starting from the analog channel the
+    // goggle had (the built-in receiver's) when there is none yet
+    g_setting.module.channel = ini_getl("module", "channel", g_setting.source.analog_channel, SETTING_INI);
+    if (g_setting.module.channel < 1 || g_setting.module.channel > ANALOG_CHANNEL_NUM) {
+        g_setting.module.channel = g_setting.source.analog_channel;
     }
 
     // Check

@@ -1106,6 +1106,11 @@ void Set_HT_dat(uint16_t ch0, uint16_t ch1, uint16_t ch2) {
 void Analog_Module_Power(bool ForceSet) {
 }
 
+bool external_analog_power_cycle(void (*while_off)(void)) {
+    (void)while_off;
+    return false; // no module bay
+}
+
 int Get_VideoLatancy_status() // ret: 0=unlocked, 1=locked
 {
     uint8_t rdat = 0;

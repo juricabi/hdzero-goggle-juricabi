@@ -26,7 +26,7 @@
 
 #ifndef _WIN32
 // Device (peer) end of each UART socketpair; the mock reads/writes here. -1 = closed.
-static int uart_emu_peer[UART_PORTS] = {-1, -1, -1, -1};
+static int uart_emu_peer[UART_PORTS] = {-1, -1, -1, -1, -1};
 #endif
 
 int uart_emu_peer_fd(int port_num) {

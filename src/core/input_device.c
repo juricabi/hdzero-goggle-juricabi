@@ -43,6 +43,7 @@
 #include "driver/rtc6715.h"
 #include "driver/screen.h"
 #include "driver/uart.h"
+#include "module/module.h"
 #include "ui/page_common.h"
 #include "ui/page_fans.h"
 #include "ui/page_headtracker.h"
@@ -238,6 +239,19 @@ static void apply_freq_entry(const scan_freq_entry_t *entry,
 }
 #endif
 
+// Analog: list entry pos of the analog source (8 entries for a Switch module in the bay,
+// src/module/module.h analog_channel_*) stored as one of the 48; the built-in receiver
+// is tuned here, the bay module follows through module.c.
+static void analog_apply_channel(int pos) {
+    const int channel = analog_channel_at(pos);
+    if (!analog_channel_set(channel))
+        return;
+#if !defined(HDZGOGGLE)
+    if (!module_bay_is_source())
+        rtc6715.set_ch(channel - 1);
+#endif
+}
+
 static void tune_after_dvr(uintptr_t action) { tune_channel((uint8_t)action); }
 
 void tune_channel(uint8_t action) {
@@ -251,35 +265,25 @@ void tune_channel(uint8_t action) {
     if (osd_is_detecting())
         return;
 
-#if defined HDZGOGGLE
-    if (g_source_info.source != SOURCE_HDZERO) {
-        return;
-    }
-
-#elif defined(HDZBOXPRO) || defined(HDZGOGGLE2)
     if (g_source_info.source != SOURCE_HDZERO && g_source_info.source != SOURCE_AV_MODULE) {
         return;
     }
-#endif
 
-#if defined(HDZGOGGLE2)
-    // There is nothing to tune while the Expansion module is the live analog
-    // receiver: it is tuned by its own controls and the goggle can only power
-    // it. Refuse here, at the single entry point, so no caller can walk a
-    // phantom channel -- previewing it, storing it, stopping the DVR and
-    // writing SPI to the powered-down Built-in receiver -- without ever
-    // changing what the pilot sees. Dual always drives the Built-in receiver,
-    // so it tunes normally.
+    // There is nothing to tune while an Expansion / bay module the goggle does not
+    // control is the live analog receiver (Goggle 1 always the bay; Goggle 2 with
+    // Expansion; Module Bay > Module None, or WiFi on): it is tuned by its own
+    // controls and the goggle can only power it. Refuse here, at the single entry
+    // point, so no caller can walk a phantom channel -- previewing it, storing it,
+    // stopping the DVR and writing SPI to the powered-down Built-in receiver --
+    // without ever changing what the pilot sees. The built-in receiver (Dual always
+    // drives it) and a bay module under module control tune normally.
     //
-    // tune_timer/tune_state therefore never leave idle on the Expansion
-    // module, so a click or long press falls through to its button callback
-    // (the menu) exactly as it does on any other untunable source.
-    if (g_source_info.source == SOURCE_AV_MODULE &&
-        g_setting.source.analog_module == SETTING_SOURCES_ANALOG_MODULE_EXTERNAL &&
-        !g_setting.source.auto_protocol_detect) {
+    // tune_timer/tune_state therefore never leave idle then, so a click or long press
+    // falls through to its button callback (the menu) exactly as it does on any other
+    // untunable source.
+    if (g_source_info.source == SOURCE_AV_MODULE && !analog_channel_tunable()) {
         return;
     }
-#endif
 
     LOGI("tune_channel:%d", action);
     if (((tune_state == 2 && (action == DIAL_KEY_CLICK || action == DIAL_KEY_PRESS)) ||
@@ -429,10 +433,8 @@ void tune_channel(uint8_t action) {
                 channel = (uint8_t)(hdz_band_ch_to_flat(
                               g_setting.source.hdzero_band,
                               g_setting.scan.channel) + 1);
-#if defined(HDZBOXPRO) || defined(HDZGOGGLE2)
             } else if (g_source_info.source == SOURCE_AV_MODULE) {
-                channel = g_setting.source.analog_channel;
-#endif
+                channel = analog_channel_pos(); // place in the list (CH1..CH8 for a Switch module)
             } else {
                 return;
             }
@@ -446,7 +448,7 @@ void tune_channel(uint8_t action) {
     if (g_source_info.source == SOURCE_HDZERO)
         channel_num = HDZ_FLAT_COUNT;
     else if (g_source_info.source == SOURCE_AV_MODULE)
-        channel_num = ANALOG_CHANNEL_NUM;
+        channel_num = analog_channel_count(); // 8 for a Switch module in the bay
     else
         return;
 
@@ -497,10 +499,8 @@ void tune_channel(uint8_t action) {
                 }
             }
         } else if (g_source_info.source == SOURCE_AV_MODULE) {
-            if (g_setting.source.analog_channel != channel) {
-                g_setting.source.analog_channel = channel;
-                ini_putl("source", "analog_channel", g_setting.source.analog_channel, SETTING_INI);
-                rtc6715.set_ch(g_setting.source.analog_channel - 1);
+            if (analog_channel_at(channel) != analog_channel_get()) {
+                analog_apply_channel(channel);
                 bool const send_msp = action == DIAL_KEY_PRESS ||
                                       (action == DIAL_KEY_CLICK && g_setting.elrs.auto_send_vtx);
                 if (send_msp && msp_channel_update()) {
@@ -542,6 +542,8 @@ void tune_channel(uint8_t action) {
 void tune_channel_confirm() {
 #if defined HDZGOGGLE
     if (g_source_info.source == SOURCE_HDZERO) {
+        tune_channel(DIAL_KEY_CLICK);
+    } else if (g_source_info.source == SOURCE_AV_MODULE) { // a bay module under module control
         tune_channel(DIAL_KEY_CLICK);
     }
 #elif defined HDZBOXPRO
@@ -636,6 +638,8 @@ void btn_press(void) // long press left key
         if (tune_timer) {
 #if defined HDZGOGGLE
             if (g_source_info.source == SOURCE_HDZERO) {
+                tune_channel(DIAL_KEY_PRESS);
+            } else if (g_source_info.source == SOURCE_AV_MODULE) { // a bay module under module control
                 tune_channel(DIAL_KEY_PRESS);
             } else {
                 (*btn_press_callback)();

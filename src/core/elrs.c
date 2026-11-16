@@ -71,6 +71,7 @@ static inline int compat_sem_timedwait(sem_t *sem, const struct timespec *abs_ti
 #include "driver/hardware.h"
 #include "driver/rtc.h"
 #include "driver/uart.h"
+#include "module/module.h"
 #include "ui/page_common.h"
 #include "ui/page_scannow.h"
 #include "ui/page_version.h"
@@ -214,24 +215,22 @@ static void change_channel_analog_locked(uint8_t const channel) {
         LOGE("Invalid analog channel %d", channel);
         return;
     }
-#if defined(HDZGOGGLE2)
-    // The Expansion module is tuned by its own controls; the goggle can only
-    // power it (Analog_Module_Power), so there is no channel to apply here.
-    // Going ahead anyway stored a channel the receiver never tunes to -- which
-    // the channel OSD then displayed as fact -- and the source re-switch below
-    // stopped the DVR and blipped the video for a change that never happened.
-    // Dual (auto_protocol_detect) always drives the Built-in receiver, so it
-    // still applies normally.
-    if (g_setting.source.analog_module == SETTING_SOURCES_ANALOG_MODULE_EXTERNAL &&
-        !g_setting.source.auto_protocol_detect) {
-        LOGI("Ignoring analog channel %d: Expansion module has no channel control", channel);
+    // Only for an analog receiver the goggle tunes: the built-in one (Goggle 2, BoxPro;
+    // Dual always drives it) or a bay module under module control (Module Bay, WiFi
+    // off).  An Expansion / bay module the goggle does not control has no channel to
+    // apply: going ahead anyway stored a channel the receiver never tunes to -- which
+    // the channel OSD then displayed as fact -- and the source re-switch below stopped
+    // the DVR and blipped the video for a change that never happened.
+    if (!analog_channel_tunable()) {
+        LOGI("Ignoring analog channel %d: the goggle does not control the bay module", channel);
         return;
     }
-#endif
-    if (g_setting.source.analog_channel != channel || g_app_state != APP_STATE_VIDEO) {
+    // Stored as it is, one of the 48 (the bay module's own channel when it is the
+    // source, src/module/module.h).  A bay module with fewer channels (Switch: 8 of the
+    // module's own band) is sent its place in its band.
+    if (analog_channel_get() != channel || g_app_state != APP_STATE_VIDEO) {
         if (dvr_defer_transition(analog_channel_after_dvr, channel)) return;
-        g_setting.source.analog_channel = channel;
-        ini_putl("source", "analog_channel", g_setting.source.analog_channel, SETTING_INI);
+        analog_channel_set(channel);
         beep();
         app_switch_to_analog(0);
         app_state_push(APP_STATE_VIDEO);
@@ -397,7 +396,9 @@ void msp_process_packet() {
             if (g_source_info.source == SOURCE_HDZERO) {
                 chan = hdz_ch2index(g_setting.source.hdzero_band, g_setting.scan.channel);
             } else if (g_source_info.source == SOURCE_AV_MODULE) {
-                chan = g_setting.source.analog_channel - 1;
+                // 255 (the backpack's CHANNEL_INDEX_UNKNOWN) for a bay module the goggle
+                // does not control: its channel is not known
+                chan = analog_channel_tunable() ? (uint8_t)(analog_channel_get() - 1) : 255;
             }
             msp_send_packet(MSP_GET_BAND_CHAN, MSP_PACKET_RESPONSE, 1, &chan);
         } break;
@@ -423,12 +424,13 @@ void msp_process_packet() {
                 // to skip every analog channel.
                 change_channel_analog((uint8_t)entry->analog_channel + 1);
                 applied = true;
-            } else if (!applied && g_source_info.source == SOURCE_AV_MODULE) {
-                // Fixed analog source.
+            }
+#endif
+            if (!applied && g_source_info.source == SOURCE_AV_MODULE) {
+                // Fixed analog source (Goggle 1: a bay module under module control).
                 change_channel_analog(chan + 1);
                 applied = true;
             }
-#endif
             if (!applied && g_source_info.source == SOURCE_HDZERO) {
                 uint8_t const hdz_ch = hdz_index2ch(chan);
                 if (hdz_ch == 0) {
@@ -445,7 +447,7 @@ void msp_process_packet() {
             if (g_source_info.source == SOURCE_HDZERO) {
                 ch = hdz_ch2index(g_setting.source.hdzero_band, g_setting.scan.channel) + 1;
             } else if (g_source_info.source == SOURCE_AV_MODULE) {
-                ch = g_setting.source.analog_channel;
+                ch = analog_channel_tunable() ? analog_channel_get() : 0; // 0: unknown
             }
             freq = ch == 0 ? 0 : freq_table[ch - 1];
             buf[0] = freq & 0xff;
@@ -475,7 +477,10 @@ void msp_process_packet() {
                 // Switch to analog from any source (see MSP_SET_BAND_CHAN).
                 change_channel_analog((uint8_t)entry->analog_channel + 1);
                 applied = true;
-            } else if (!applied && g_source_info.source == SOURCE_AV_MODULE) {
+            }
+#endif
+            if (!applied && g_source_info.source == SOURCE_AV_MODULE) {
+                // (Goggle 1: a bay module under module control)
                 if (entry && entry->analog_channel >= 0) {
                     change_channel_analog((uint8_t)entry->analog_channel + 1);
                 } else if (freq_index >= 0) {
@@ -485,7 +490,6 @@ void msp_process_packet() {
                 }
                 applied = true;
             }
-#endif
             if (!applied && g_source_info.source == SOURCE_HDZERO) {
                 if (freq_index < 0) {
                     LOGE("Invalid HDZero channel for frequency %d", freq);
@@ -673,19 +677,17 @@ bool msp_channel_update() {
         // caller used to get, including the analog dial confirm) retuned the
         // VTX to an unrelated frequency while the goggle stayed on analog, so
         // the pilot's video simply went away.
-        uint8_t const ch = g_setting.source.analog_channel;
+        // An Expansion / bay module the goggle does not control (Module Bay > Module
+        // None, WiFi on) is tuned by its own controls, so no stored channel says what
+        // it receives. Transmitting one would move the pilot's VTX to a channel picked
+        // out of a stale setting; send nothing instead. The built-in receiver (Dual
+        // always drives it) and a controlled bay module have a real channel: the bay
+        // module's own one when it is the source (src/module/module.h).
+        if (!analog_channel_tunable())
+            return false;
+        uint8_t const ch = analog_channel_get();
         if (ch == 0 || ch > ANALOG_CHANNEL_NUM)
             return false; // Invalid value -> ignore
-#if defined(HDZGOGGLE2)
-        // The Expansion module is tuned by its own controls, so analog_channel
-        // says nothing about what is actually being received. Transmitting it
-        // would move the pilot's VTX to a channel picked out of a stale
-        // setting; send nothing instead. Dual always drives the Built-in
-        // receiver, so its channel is real.
-        if (g_setting.source.analog_module == SETTING_SOURCES_ANALOG_MODULE_EXTERNAL &&
-            !g_setting.source.auto_protocol_detect)
-            return false;
-#endif
         chan = ch - 1;
     } else {
         // HDZero -- and every other source, which keeps the previous

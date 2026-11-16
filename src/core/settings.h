@@ -359,6 +359,12 @@ typedef struct {
 } setting_analog_rssi_t;
 
 typedef struct {
+    int type;    // module_type_t, 0 None (the bay pins, PG0-PG2 = WiFi SDIO, never touched)
+    int setting; // Mode list entry of that type
+    int channel; // Goggle 2: the bay module's channel, 1..48 (Goggle 1: source.analog_channel)
+} setting_module_t;
+
+typedef struct {
     setting_scan_t scan;
     setting_fan_t fans;
     setting_autoscan_t autoscan;
@@ -377,6 +383,7 @@ typedef struct {
     language_t language;
     setting_analog_rssi_t analog_rssi;
     bool has_all_features;
+    setting_module_t module; // module bay (src/module/module.h)
 } setting_t;
 
 extern setting_t g_setting;

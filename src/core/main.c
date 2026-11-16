@@ -48,6 +48,7 @@ SDL_mutex *global_sdl_mutex;
 #include "driver/rtc.h"
 #include "driver/screen.h"
 #include "driver/tp2825.h"
+#include "module/module.h"
 #include "ui/page_power.h"
 #include "ui/page_scannow.h"
 #include "ui/page_source.h"
@@ -284,6 +285,7 @@ int main(int argc, char *argv[]) {
     elrs_init();
     ht_init();
     beep_init();
+    module_init(); // module bay: before the first bay power command (8.1)
 
     // 4. Initilize UI
     lvgl_init();

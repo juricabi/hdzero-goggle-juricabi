@@ -24,6 +24,7 @@ static char *uart_ports[UART_PORTS] = {
     "/dev/ttyS1",
     "/dev/ttyS2",
     "/dev/ttyS3",
+    "/dev/ttySOFT0", // soft_uart.ko on PG0/PG1 (src/module/steadyview_x.c)
 };
 
 int uart_set_opt(int fd, int nSpeed, int nBits, char nEvent, int nStop) {
