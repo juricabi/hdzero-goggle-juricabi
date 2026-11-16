@@ -1,0 +1,15 @@
+# Goggle 1 or 2: the main menu from the top, then wrapping up to its last three entries
+w 2
+s u00_top
+k s 7
+w 1
+s u01_idx7
+k w 8
+w 1
+s u02_last
+k w
+w 1
+s u03_second_last
+k w
+w 1
+s u04_third_last

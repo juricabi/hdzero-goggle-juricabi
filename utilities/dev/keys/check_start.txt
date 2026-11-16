@@ -1,0 +1,20 @@
+# Goggle 1 or 2 (ripples-all): 2 s untouched (c00), the Module Bay page opened (k w 2 from the top: the
+# entry before Go Sleep!), Check Pins clicked, the page left (c09)
+w 2
+s c00_untouched
+c c00
+k w 2
+w 1
+s c01_modulebay_preview
+k d
+w 1
+s c02_modulebay
+k s
+k d
+w 3
+s c03_check_pins
+l d
+w 1
+s c04_menu_after_modulebay
+c c09
+w 2

@@ -1,0 +1,15 @@
+# Goggle 1 with WiFi on in setting.ini: Module Bay refuses Check Pins
+w 3
+k w 2
+w 1
+s x00_mb_preview_wifi_on
+k d
+w 1
+s x01_mb_enter_wifi_on
+k s
+k d
+w 3
+s x02_check_pins_wifi_on
+l d
+w 1
+s x03_menu
