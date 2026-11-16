@@ -118,6 +118,11 @@ void Set_HT_status(uint8_t is_open, uint8_t frame_period, uint8_t sync_len);
 void Set_HT_dat(uint16_t ch0, uint16_t ch1, uint16_t ch2);
 
 void Analog_Module_Power(bool Force);
+// Module bay worker (SteadyView mode set): when the bay is powered, switches it off
+// for 70 ms, calls while_off() at the end of that and switches it on again
+// (DM5680_ExternalAnalog_PowerCycle()).  False (nothing done): bay off, or no bay
+// power switch (batch 1 hardware, BoxPro).
+bool external_analog_power_cycle(void (*while_off)(void));
 
 int HDZERO_detect();
 int AV_in_detect();

@@ -1227,11 +1227,20 @@ void Analog_Module_Power(bool ForceSet) {
             // source; power it off on other sources (HDZero/HDMI).
             Analog_Module_Power_State = (g_source_info.source == SOURCE_AV_MODULE) ? 0 : 1;
         }
-        if ((Analog_Module_Power_State_Last != Analog_Module_Power_State) || (ForceSet == 1)) {
+        // (the first call always sends: the module bay learns the bay power from the commands)
+        static bool Analog_Module_Power_Sent = false;
+        if ((Analog_Module_Power_State_Last != Analog_Module_Power_State) || (ForceSet == 1) || !Analog_Module_Power_Sent) {
             Analog_Module_Power_State_Last = Analog_Module_Power_State;
+            Analog_Module_Power_Sent = true;
             DM5680_ExternalAnalog_Power(Analog_Module_Power_State);
         }
     }
+}
+
+bool external_analog_power_cycle(void (*while_off)(void)) {
+    if (getHwRevision() < HW_REV_2)
+        return false; // no bay power switch
+    return DM5680_ExternalAnalog_PowerCycle(while_off);
 }
 
 int Get_VideoLatancy_status() // ret: 0=unlocked, 1=locked

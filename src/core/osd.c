@@ -33,6 +33,7 @@
 #include "driver/nct75.h"
 #include "driver/rtc.h"
 #include "driver/rtc6715.h"
+#include "module/module.h"
 #include "ui/page_common.h"
 #include "ui/page_fans.h"
 #include "ui/page_scannow.h"
@@ -543,41 +544,34 @@ void osd_channel_show(bool bShow) {
             snprintf(buf, sizeof(buf), "  To %s/%s?  ",
                      channel2str(preview_is_hdz, preview_band, ch), tag);
         } else {
+            // the dial on the analog source walks its channel list (src/module/module.h:
+            // "CH3" for a Switch module in the bay)
             snprintf(buf, sizeof(buf), "  To %s?  ",
-                     channel2str(preview_is_hdz, preview_band, ch));
+                     preview_is_hdz ? channel2str(1, preview_band, ch) : analog_channel_name(ch));
         }
         lv_obj_set_style_bg_opa(g_osd_hdzero.channel[is_fhd], LV_OPA_100, 0);
     } else {
         if (g_source_info.source == SOURCE_HDZERO) {
             ch = g_setting.scan.channel & 0x7F;
+        } else if (g_source_info.source == SOURCE_AV_MODULE && analog_channel_tunable()) {
+            // the built-in receiver (Dual always drives it) or a bay module under module
+            // control: its place in the list of the analog source
+            ch = analog_channel_pos();
         } else {
-#if defined(HDZGOGGLE2) || defined(HDZBOXPRO)
-            if (g_source_info.source == SOURCE_AV_MODULE) {
-#if defined(HDZGOGGLE2)
-                // The Expansion module is tuned by its own controls, so the
-                // stored analog channel says nothing about what it is actually
-                // receiving. Hide the tag rather than present a guess as fact;
-                // the analog RSSI bar is hidden here for the same reason. Dual
-                // always drives the Built-in receiver, so it keeps its tag.
-                if (g_setting.source.analog_module == SETTING_SOURCES_ANALOG_MODULE_EXTERNAL &&
-                    !g_setting.source.auto_protocol_detect) {
-                    bShow = false;
-                } else
-#endif
-                {
-                    ch = g_setting.source.analog_channel & 0x7F;
-                }
-            } else {
-                bShow = false;
-            }
-#elif defined(HDZGOGGLE)
+            // An Expansion / bay module the goggle does not control is tuned by its own
+            // controls, so no stored channel says what it is actually receiving. Hide the
+            // tag rather than present a guess as fact; the analog RSSI bar is hidden there
+            // for the same reason.
             bShow = false;
-#endif
         }
 
         if (bShow) {
             color = lv_color_make(0xFF, 0xFF, 0xFF);
-            snprintf(buf, sizeof(buf), "CH:%s", channel2str(g_source_info.source == SOURCE_HDZERO, g_setting.source.hdzero_band, ch));
+            const char *name = g_source_info.source == SOURCE_HDZERO
+                                   ? channel2str(1, g_setting.source.hdzero_band, ch)
+                                   : analog_channel_name(ch);
+            // (bay module names such as "CH3" for a Switch module go without a second "CH:")
+            snprintf(buf, sizeof(buf), strncmp(name, "CH", 2) ? "CH:%s" : "%s", name);
             lv_obj_set_style_bg_opa(g_osd_hdzero.channel[is_fhd], 0, 0);
         }
     }
@@ -594,15 +588,15 @@ void osd_channel_show(bool bShow) {
     // It is only raised after msp_channel_update() confirms a real send.
     if (channel_osd_sent) {
         bool const is_hdz = g_source_info.source == SOURCE_HDZERO;
-        uint8_t const sent_channel = (is_hdz ? g_setting.scan.channel
-                                             : g_setting.source.analog_channel) & 0x7F;
+        uint8_t const sent_channel = (is_hdz ? g_setting.scan.channel : 0) & 0x7F;
         if (g_setting.elrs.vtx_sent_style == SETTING_VTX_SENT_STYLE_SUBTLE) {
             lv_label_set_text(g_osd_hdzero.vtx_sent[is_fhd], "VTX SENT");
             lv_obj_set_style_bg_opa(g_osd_hdzero.vtx_sent[is_fhd], LV_OPA_TRANSP, 0);
             lv_obj_set_style_text_color(g_osd_hdzero.vtx_sent[is_fhd], lv_color_make(0x00, 0xB0, 0x00), 0);
         } else {
             snprintf(buf, sizeof(buf), "  %s  VTX SENT  ",
-                     channel2str(is_hdz, g_setting.source.hdzero_band, sent_channel));
+                     is_hdz ? channel2str(1, g_setting.source.hdzero_band, sent_channel)
+                            : analog_channel_current_name()); // (what msp_channel_update() sent)
             lv_label_set_text(g_osd_hdzero.vtx_sent[is_fhd], buf);
             lv_obj_set_style_bg_opa(g_osd_hdzero.vtx_sent[is_fhd], LV_OPA_100, 0);
             lv_obj_set_style_text_color(g_osd_hdzero.vtx_sent[is_fhd], lv_color_make(0x00, 0xFF, 0x00), 0);
@@ -925,7 +919,9 @@ void osd_hdzero_update(void) {
     bool showRXOSD = false;
 
 #if defined(HDZGOGGLE)
-    if (source_is_hdzero) {
+    // analog: only for the channel label of a bay module under module control
+    // (osd_channel_show() hides it otherwise); Goggle 1 has no analog RSSI bar
+    if (source_is_hdzero || source_is_analog) {
         showRXOSD = g_setting.osd.is_visible;
     }
 #elif defined(HDZBOXPRO) || defined(HDZGOGGLE2)

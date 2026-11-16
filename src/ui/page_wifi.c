@@ -23,6 +23,7 @@
 #include "core/common.hh"
 #include "core/dvr.h"
 #include "lang/language.h"
+#include "module/module.h"
 #include "ui/page_common.h"
 #include "ui/ui_attribute.h"
 #include "ui/ui_keyboard.h"
@@ -341,6 +342,17 @@ static void page_wifi_update_settings() {
         system_script(WIFI_OFF);
     }
     page_wifi_update_services();
+
+    // The WiFi chip's SDIO bus is on the module bay pins (PG0-PG2): module control
+    // lets go of them before WiFi starts and may take them again once it is off. If it
+    // has not let go within 3 s, WiFi is not started now and shows Off.
+    if (!module_wifi_changed()) {
+        LOGE("WiFi not started: the module bay still holds PG0-PG2 (the WiFi SDIO bus)");
+        g_setting.wifi.enable = false;
+        settings_put_bool("wifi", "enable", false);
+        btn_group_set_sel(&page_wifi.page_1.enable.button, 1);
+        module_wifi_changed();
+    }
 
     // Activate WiFi services
     if (g_setting.wifi.enable) {

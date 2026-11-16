@@ -27,6 +27,7 @@
 #include "core/msp_displayport.h"
 #include "core/osd.h"
 #include "driver/uart.h"
+#include "module/module.h"
 #include "ui/page_common.h"
 
 #ifdef EMULATOR_BUILD
@@ -344,12 +345,44 @@ void DM5680_ResetHDMI_RX(uint8_t on) // Reset HDMI_RX,0=reset
     Cmd_to_DM5680(1, Cmd, 5);
 }
 
-void DM5680_ExternalAnalog_Power(uint8_t on) {
+static void external_analog_power_cmd(uint8_t on) {
     uint8_t Cmd[5] = {0xAA, 0x55, 0x02, 0x6, 0x00};
 	      // Note Cmd[4] = 0 means power on for external analog module
 	Cmd[4] = !on;
        // LOGI("DM5680_ExternalAnalog_Power %d", on);
     Cmd_to_DM5680(1, Cmd, 5);
+}
+
+// The expansion bay power.  The argument as its callers use it: 0 switches the bay on, 1 off
+// (Analog_Module_Power(): "power state 0 = expansion module ON, 1 = OFF"; sleep_mode.c: 1).
+// Every command is reported to the module bay (src/module/module.c): its pins are released while
+// the bay is off and set up again MODULE_BOOT_MS after it came on.  bay_power_lock keeps the
+// commands and SteadyView's power cycle (DM5680_ExternalAnalog_PowerCycle()) apart.
+static pthread_mutex_t bay_power_lock = PTHREAD_MUTEX_INITIALIZER;
+static int bay_power_on = -1; // after the last command: 1 on, 0 off, -1 none yet
+
+void DM5680_ExternalAnalog_Power(uint8_t on) {
+    pthread_mutex_lock(&bay_power_lock);
+    external_analog_power_cmd(on);
+    bay_power_on = on == 0;
+    module_power_changed(bay_power_on);
+    pthread_mutex_unlock(&bay_power_lock);
+}
+
+bool DM5680_ExternalAnalog_PowerCycle(void (*while_off)(void)) {
+    bool done = false;
+    pthread_mutex_lock(&bay_power_lock);
+    if (bay_power_on == 1) {
+        external_analog_power_cmd(1); // off
+        usleep(70000);
+        if (while_off)
+            while_off();
+        usleep(50);
+        external_analog_power_cmd(0); // on again (not reported: the module bay asked for it)
+        done = true;
+    }
+    pthread_mutex_unlock(&bay_power_lock);
+    return done;
 }
 void DM5680_InternalAnalog_Power(uint8_t on) {
     uint8_t Cmd[5] = {0xAA, 0x55, 0x02, 0x7, 0x00};

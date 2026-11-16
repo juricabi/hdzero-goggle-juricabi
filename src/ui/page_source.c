@@ -23,6 +23,7 @@
 #include "driver/rtc6715.h"
 #include "driver/screen.h"
 #include "lang/language.h"
+#include "module/module.h"
 #include "ui/page_common.h"
 #include "ui/page_scannow.h"
 #include "ui/ui_main_menu.h"
@@ -244,13 +245,21 @@ void source_status_timer() {
     }
     lv_label_set_text(label[0], buf);
 
+    // the bay module's channel (its own list, e.g. CH1..CH8 for a Switch module) when
+    // the goggle controls it, none when it does not
 #if defined(HDZGOGGLE)
-    snprintf(buf, sizeof(buf), "%s: %s", _lang("Analog"), state2string(g_source_info.av_bay_status));
+    if (analog_channel_tunable())
+        snprintf(buf, sizeof(buf), "%s %s: %s", _lang("Analog"), analog_channel_current_name(),
+                 state2string(g_source_info.av_bay_status));
+    else
+        snprintf(buf, sizeof(buf), "%s: %s", _lang("Analog"), state2string(g_source_info.av_bay_status));
 #elif defined(HDZBOXPRO)
     snprintf(buf, sizeof(buf), "%s: %s", _lang("Analog"), channel2str(0, 0, g_setting.source.analog_channel));
 #elif defined(HDZGOGGLE2)
     if (g_setting.source.analog_module == SETTING_SOURCES_ANALOG_MODULE_INTERNAL) {
         snprintf(buf, sizeof(buf), "%s: %s", _lang("Analog"), channel2str(0, 0, g_setting.source.analog_channel));
+    } else if (module_bay_controlled()) {
+        snprintf(buf, sizeof(buf), "%s: %s %s", _lang("Analog"), _lang("Expansion Module"), module_channel_name());
     } else {
         snprintf(buf, sizeof(buf), "%s: %s", _lang("Analog"), _lang("Expansion Module"));
     }
@@ -294,6 +303,7 @@ static void disable_auto_protocol_detect(void) {
     if (g_setting.source.auto_protocol_detect) {
         g_setting.source.auto_protocol_detect = false;
         settings_put_bool("source", "auto_protocol_detect", false);
+        module_source_changed(); // Goggle 2, Expansion: the bay module is the source again
     }
 }
 #endif
@@ -561,6 +571,7 @@ static void page_source_on_click(uint8_t key, int sel) {
         btn_group_toggle_sel(&btn_group0);
         g_setting.source.analog_module = btn_group_get_sel(&btn_group0);
         ini_putl("source", "analog_module", g_setting.source.analog_module, SETTING_INI);
+        module_source_changed(); // the bay module gets its mode and channel again
         break;
 #endif
     case ROW_ANALOG_RATIO:

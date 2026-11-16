@@ -10,6 +10,7 @@
 #include "core/scan_core.h"
 #include "driver/beep.h"
 #include "lang/language.h"
+#include "module/module.h"
 #include "ui/page_common.h"
 #include "ui/page_playback.h"
 #include "ui/page_storage.h"
@@ -69,18 +70,20 @@ static void statusbar_format_source(char *buf, size_t len) {
     } else if (g_source_info.source == SOURCE_AV_IN) {
         snprintf(buf, len, "AV %s", _lang("In"));
     } else if (g_source_info.source == SOURCE_AV_MODULE) {
-#if defined(HDZGOGGLE)
-        snprintf(buf, len, "%s: %s", _lang("RF"), _lang("Analog"));
-#else // BoxPro + G2: built-in analog, with channel and auto-detect tagging
-        if (g_setting.source.auto_protocol_detect) {
+#if defined(HDZBOXPRO) || defined(HDZGOGGLE2)
+        if (g_setting.source.auto_protocol_detect) { // Dual: the built-in receiver, tagged
             snprintf(buf, len, "%s: %s", _lang("RF"),
                      channel2str_tagged(PROTOCOL_ANALOG,
                                         g_setting.source.analog_channel));
-        } else {
-            snprintf(buf, len, "%s: %s %s", _lang("RF"), _lang("Analog"),
-                     channel2str(0, 0, g_setting.source.analog_channel));
-        }
+        } else
 #endif
+        // the channel name of the analog source (the bay module's list when it is the
+        // source, src/module/module.h), none when the goggle does not tune the bay module
+        if (analog_channel_tunable()) {
+            snprintf(buf, len, "%s: %s %s", _lang("RF"), _lang("Analog"), analog_channel_current_name());
+        } else {
+            snprintf(buf, len, "%s: %s", _lang("RF"), _lang("Analog"));
+        }
     } else {
         snprintf(buf, len, " ");
     }
@@ -339,7 +342,13 @@ void statubar_update(void) {
     static source_t source_last = SOURCE_HDZERO;
     static setting_sources_hdzero_band_t hdzero_band_last = SETTING_SOURCES_HDZERO_BAND_RACEBAND;
     static bool auto_protocol_detect_last = false;
-    uint8_t channel_changed = (hdzero_channel_last != g_setting.scan.channel) || (analog_channel_last != g_setting.source.analog_channel);
+    static int analog_list_last = -1;
+    // the analog channel list changes with Source > Analog Module, the Module Bay
+    // Module and whether the bay is controlled (Module None, WiFi)
+    const int analog_list = (analog_channel_tunable() ? 0x10000 : 0) | (module_bay_is_source() ? 0x100 : 0) | analog_channel_count();
+    uint8_t channel_changed = (hdzero_channel_last != g_setting.scan.channel) || (analog_channel_last != analog_channel_get()) ||
+                              (analog_list_last != analog_list);
+    analog_list_last = analog_list;
     if (!source_detecting &&
         (channel_changed || (source_last != g_source_info.source) ||
          (hdzero_band_last != g_setting.source.hdzero_band) ||
@@ -350,7 +359,7 @@ void statubar_update(void) {
     }
 
     hdzero_channel_last = g_setting.scan.channel;
-    analog_channel_last = g_setting.source.analog_channel;
+    analog_channel_last = analog_channel_get();
     source_last = g_source_info.source;
     hdzero_band_last = g_setting.source.hdzero_band;
     auto_protocol_detect_last = g_setting.source.auto_protocol_detect;
