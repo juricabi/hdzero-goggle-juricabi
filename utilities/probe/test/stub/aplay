@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "stub aplay $*"
+case "$*" in *" -l"* | *" -L"* | "-l" | "-L") exit 0 ;; esac
+exec busybox sleep "${STUB_APLAY_S:-1}"

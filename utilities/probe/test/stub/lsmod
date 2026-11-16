@@ -1,0 +1,5 @@
+#!/bin/sh
+. "$(dirname "$0")/model.sh"
+outside_window lsmod "$@"
+echo "Module                  Size  Used by"
+busybox cat "$PROBE_ROOT/proc/modules"

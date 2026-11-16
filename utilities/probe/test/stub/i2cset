@@ -1,0 +1,14 @@
+#!/bin/sh
+. "$(dirname "$0")/model.sh"
+[ "$1" = -y ] && shift
+bus=$1
+addr=$(n8 "$2")
+reg=$(n8 "$3")
+val=$(n8 "$4")
+busybox usleep "${STUB_I2C_US:-3000}"
+i2c_absent "$bus" "$addr" && exit 1
+case "$addr" in 0x4c | 0x49) app_unstopped && viol "i2cset $bus $addr $reg $val while the app runs" ;; esac
+k=$(i2c_key "$bus" "$addr" "$reg")
+echo "W $bus $addr $k $val" >> "$M/i2c_writes"
+kv_set "$(i2c_file "$bus" "$addr")" "$k" "$val"
+exit 0

@@ -1,0 +1,4 @@
+#!/bin/sh
+. "$(dirname "$0")/model.sh"
+outside_window i2cdetect "$@"
+echo "i2c-1 i2c sunxi i2c adapter"

@@ -1,0 +1,12 @@
+#!/bin/sh
+# stub sleep: samples the module-bay pins at every sleep of a script (bay_gpio_pattern.sh sleeps
+# between all its steps): two or more of GPIO 192-194 outputs at the same time is a violation
+# (a clip touching two neighbouring pins would join two driven SoC outputs); then the real sleep
+G="${PROBE_ROOT:-/nonexistent}/sys/class/gpio"
+n=0
+for p in 192 193 194; do
+    d=$(busybox cat "$G/gpio$p/direction" 2> /dev/null)
+    case "$d" in out | low | high) n=$((n + 1)) ;; esac
+done
+[ "$n" -gt 1 ] && echo "$n of GPIO 192-194 outputs at once (at sleep $*)" >> "${MODEL:-/dev/null}/violations"
+exec busybox sleep "$@"

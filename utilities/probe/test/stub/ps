@@ -1,0 +1,6 @@
+#!/bin/sh
+# stub busybox ps: a header, and an aww process while $MODEL/aww exists
+echo "  PID USER       VSZ STAT COMMAND"
+echo "    1 root      1528 S    init"
+[ -e "${MODEL:-/nonexistent}/aww" ] && echo "  999 root      1528 S    {aww} /bin/sh /usr/sbin/aww 0x0300b340 0x00000008"
+exit 0

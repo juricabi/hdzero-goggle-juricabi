@@ -1,0 +1,27 @@
+#!/bin/sh
+. "$(dirname "$0")/model.sh"
+first=0
+last=255
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -y | -f) shift ;;
+        -r)
+            first=$((${2%-*}))
+            last=$((${2#*-}))
+            shift 2
+            ;;
+        *) break ;;
+    esac
+done
+bus=$1
+addr=$(n8 "$2")
+i2c_absent "$bus" "$addr" && exit 1
+case "$addr" in 0x4c | 0x49) app_unstopped && viol "i2cdump $bus $addr while the app runs" ;; esac
+echo "     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f"
+r=$first
+while [ "$r" -le "$last" ]; do
+    k=$(i2c_key "$bus" "$addr" "$(n8 "$r")")
+    echo "R $bus $addr $k" >> "$M/i2c_reads"
+    r=$((r + 1))
+done
+echo "00: 54 49 12 06 (stub)"

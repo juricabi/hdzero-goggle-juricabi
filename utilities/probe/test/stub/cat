@@ -1,0 +1,21 @@
+#!/bin/sh
+# stub cat: the sunxi_dump latch model for $PROBE_ROOT/sys/class/sunxi_dump/dump; every other
+# use is the real cat
+D="${PROBE_ROOT:-/nonexistent}/sys/class/sunxi_dump/dump"
+if [ "$#" -ne 1 ] || [ "$1" != "$D" ]; then exec busybox cat "$@"; fi
+. "$(dirname "$0")/model.sh"
+soc_apply_write
+[ -n "${MODEL_FLUSH:-}" ] && exit 0
+app_unstopped && viol "sunxi_dump read while the goggle app runs"
+a=$(n32 "$(busybox cat "$D")")
+echo "R $a" >> "$M/soc_reads"
+[ "$a" = 0x0300b0d8 ] && soc_gpio_mux
+n=$(counter "rd_$a")
+if [ -n "${STUB_LATCH_ECHO:-}" ]; then # the old stub: a plain file, reads give the address back
+    echo "$a"
+    exit 0
+fi
+if [ "$a" = "${STUB_RACE_ADDR:-x}" ]; then # another process moved the latch between echo and cat
+    case " ${STUB_RACE_N:-} " in *" $n "*) a=$(n32 "${STUB_RACE_OTHER:-0x0300b0f8}") ;; esac
+fi
+printf '0x%x\n' "$(kv_get "$M/soc" "$a" 0)"

@@ -1,0 +1,13 @@
+#!/bin/sh
+# stub pidof HDZGOGGLE: the live fake apps
+. "$(dirname "$0")/model.sh"
+[ "$1" = HDZGOGGLE ] || exit 1
+o=""
+if [ -f "$M/app.pids" ]; then
+    while read -r p; do
+        s=$(st_of "$p")
+        case "$s" in "" | Z) ;; *) o="$o $p" ;; esac
+    done < "$M/app.pids"
+fi
+[ -n "$o" ] || exit 1
+echo $o

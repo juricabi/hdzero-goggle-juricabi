@@ -1,0 +1,5 @@
+#!/bin/sh
+# the fake goggle app: records its pid and sleeps
+exec < /dev/null > /dev/null 2>&1
+echo $$ >> "$MODEL/app.pids"
+exec busybox sleep 600
