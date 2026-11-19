@@ -93,7 +93,7 @@ static const row_t rows[] = {
     {.type = ROW_SOURCE, .field = AUDIO_MIXER_SOURCE, .name = "Audio Source"}, // hint: row_hint()
     HEADING("Volume Control"),
     {.type = ROW_DVR_VOLUME, .field = AUDIO_MIXER_FIELD_COUNT, .name = "DVR Playback", .hint = "Headphone volume while a DVR file plays"},
-    {.type = ROW_LIVE_VOLUME, .field = AUDIO_MIXER_LIVE_VOLUME, .name = "Live Volume", .hint = "Headphone volume. Does not affect recording"},
+    {.type = ROW_LIVE_VOLUME, .field = AUDIO_MIXER_LIVE_VOLUME, .name = "Live Volume", .hint = "Headphone volume. Also sets the A/V In level"},
     SLIDER(AUDIO_MIXER_MIC_GAIN, "Mic Gain", "Mic gain for headphones and recording"),
     SLIDER(AUDIO_MIXER_LINEIN_GAIN, "Line/AV Gain", "Level of the recording, the stream and HDMI out"),
     {.type = ROW_TEST, .field = AUDIO_MIXER_FIELD_COUNT, .name = "Run Test"}, // hint: ripples' note
@@ -145,6 +145,11 @@ static const row_t rows[] = {
 #define HINT_HDMI_RESTART "Restart the goggle to use HDMI In Audio"
 // HDMI Out Audio switched on, but kept off at this start (core/hdmi_audio.h: the reason follows)
 #define HINT_HDMI_FAULT "Off at this start"
+// HDMI Out Audio can be switched on only with the read-only probe's GO for this board (hdmi_boot.h)
+#define HINT_HDMI_PROBE "Run the HDMI audio probe first (hdmi-audio.md, 7)"
+// a Mic or Line/AV test recorded nothing: the audio input is held by Stream Audio or HDMI Out Audio
+// (the record daemon's capture), or failed otherwise; the two rows' names follow
+#define HINT_TEST_BUSY "Nothing recorded: audio input busy"
 // value column of the HDMI rows: the switch differs from what is in effect, or it failed
 #define MARK_RESTART "Restart"
 #define MARK_ERROR   "Error"
@@ -152,12 +157,16 @@ static const row_t rows[] = {
 #if defined(HDZBOXPRO) || defined(HDZGOGGLE2)
 // "Active", not "wired": a received analog signal (e.g. a transmitting drone) feeds the tests too,
 // not just the AV jack.
-#define HINT_TEST "1. Mic: record 5s, auto playback.\n2. Line/AV: record 5s, auto playback.\n3. Test fill: pulsing = loading, red = recording, green = playback.\n4. Live & Line/AV need an active analog audio source."
+static const char *const HINT_TEST[] = {"1. Mic: record 5s, auto playback.", "2. Line/AV: record 5s, auto playback.",
+                                         "3. Test fill: pulsing = loading, red = recording, green = playback.",
+                                         "4. Live & Line/AV need an active analog audio source."};
 #else
 // The faint clicking is menu-mode electrical interference coupling into the codec converters
 // (confirmed by waveform analysis: ~130 analog impulses/s in menu captures, zero in video-mode
 // recordings on the same unit). Not reachable from software; flights and DVR playback are clean.
-#define HINT_TEST "1. Mic: record 5s, auto playback.\n2. Line/AV: record 5s, auto playback.\n3. Test fill: pulsing = loading, red = recording, green = playback.\n4. Clicking or static during tests is normal in the menu, flight recordings are unaffected."
+static const char *const HINT_TEST[] = {"1. Mic: record 5s, auto playback.", "2. Line/AV: record 5s, auto playback.",
+                                         "3. Test fill: pulsing = loading, red = recording, green = playback.",
+                                         "4. Clicking or static during tests is normal in the menu, flight recordings are unaffected."};
 #endif
 
 /*
@@ -219,6 +228,7 @@ static volatile audio_test_phase_t audio_test_phase;
 static volatile uint32_t audio_test_phase_duration_ms; // 0 = indeterminate
 static volatile audio_test_mode_t active_test_mode = AUDIO_TEST_DVR;
 static volatile audio_test_mode_t selected_test_mode = AUDIO_TEST_DVR;
+static volatile bool audio_test_busy; // the last Mic / Line/AV test recorded nothing (shown instead of the note)
 static uint32_t audio_test_update_ms;
 
 static void save_timer_cb(lv_timer_t *timer) {
@@ -288,6 +298,17 @@ static bool hdmi_restart_pending(const row_t *row) {
     return false;
 }
 
+// A line of ripples' note in the user's language: its key in the language files has '-' for '=' (a key
+// cannot hold '='); without a translation, the line as it is.
+static const char *note_line(const char *line, char *key, size_t size) {
+    snprintf(key, size, "%s", line);
+    for (char *p = key; *p; p++)
+        if (*p == '=')
+            *p = '-';
+    const char *t = _lang(key);
+    return t == key ? line : t;
+}
+
 static void row_hint(const row_t *row, char *buf, size_t size) {
     const char *text = row->hint;
     if (is_record_source(row)) {
@@ -297,13 +318,24 @@ static void row_hint(const row_t *row, char *buf, size_t size) {
             text = audio_mixer_get(row->field) ? HINT_DIRECT_YES : HINT_DIRECT_NO;
     } else if (row->type == ROW_SOURCE) {
         text = audio_mixer_is_preset() ? HINT_DIRECT_YES : HINT_SOURCE_CHANGED;
+    } else if (row->type == ROW_TEST && audio_test_busy) {
+        snprintf(buf, size, "%s (%s, %s)", _lang(HINT_TEST_BUSY), _lang("Stream Audio"), _lang("HDMI Out Audio"));
+        return;
     } else if (row->type == ROW_TEST) {
-        text = HINT_TEST;
+        // ripples' note, line by line
+        char key[160];
+        size_t len = 0;
+        buf[0] = 0;
+        for (size_t i = 0; i < ARRAY_SIZE(HINT_TEST) && len < size; i++)
+            len += snprintf(buf + len, size - len, "%s%s", i ? "\n" : "", note_line(HINT_TEST[i], key, sizeof(key)));
+        return;
     } else if (!hdmi_level_usable(row)) {
         text = hdmi_audio_in_enabled() ? HINT_HDMI_RESTART : HINT_HDMI_OFF;
     } else if (row->type == ROW_HDMI_OUT && hdmi_out_fault()) {
         snprintf(buf, size, "%s: %s", _lang(HINT_HDMI_FAULT), _lang(hdmi_out_fault()));
         return;
+    } else if (row->type == ROW_HDMI_OUT && !hdmi_audio_out_allowed()) {
+        text = HINT_HDMI_PROBE;
     }
     snprintf(buf, size, "%s", text ? _lang(text) : "");
 }
@@ -355,6 +387,9 @@ static void update_rows(void) {
         case ROW_HDMI_OUT:
         case ROW_HDMI_IN:
             btn_group_set_sel(&switches[r], switch_value(row) ? 0 : 1);
+            // HDMI Out Audio: only with the probe's GO for this board (one that is on can be switched off)
+            if (row->type == ROW_HDMI_OUT)
+                btn_group_enable(&switches[r], hdmi_audio_out_allowed() || hdmi_audio_out_enabled());
             buf[0] = 0;
             if (row->type == ROW_HDMI_OUT && hdmi_out_fault())
                 snprintf(buf, sizeof(buf), "#FFA000 %s#", _lang(MARK_ERROR));
@@ -648,6 +683,11 @@ static void page_audio_update_test_indicator(uint32_t delta_ms) {
     // in step with the known phase duration.
     audio_test_phase_t phase = audio_test_phase;
     bool running = audio_test_running;
+    static bool prev_busy = false;
+    if (audio_test_busy != prev_busy) {
+        prev_busy = audio_test_busy;
+        update_hint();
+    }
     if (phase != prev_phase || running != prev_running) {
         phase_elapsed_ms = 0;
         prev_phase = phase;
@@ -772,7 +812,9 @@ static const char *page_audio_capture_path(void) {
     return AUDIO_TEST_CAPTURE;
 }
 
-static void page_audio_capture_wav(setting_record_audio_source_t source) {
+// true: something was recorded (more than a WAV header)
+static bool page_audio_capture_wav(setting_record_audio_source_t source) {
+    bool ok;
     dvr_test_select_audio_source(source);
     audio_test_phase_duration_ms = AUDIO_TEST_SECONDS * 1000;
     audio_test_phase = AUDIO_TEST_PHASE_RECORDING;
@@ -781,15 +823,22 @@ static void page_audio_capture_wav(setting_record_audio_source_t source) {
     // static on the G1 (confirmed by playing them on a computer) regardless
     // of ALSA device or buffering, while normal DVR recordings -- made by
     // this engine -- are clean.
-    wav_test_record(page_audio_capture_path(), AUDIO_TEST_SECONDS);
+    ok = wav_test_record(page_audio_capture_path(), AUDIO_TEST_SECONDS) == 0;
 #else
     // BoxPro/G2: ALSA capture is clean on their kernel (see
     // page_audio_play_wav).
     char buf[256];
     snprintf(buf, sizeof(buf), "%s -D plughw:audiocodec -B 500000 -F 125000 -t wav -f S16_LE -c2 -r 48000 -d %d %s",
              AUDIO_TEST_ARECORD, AUDIO_TEST_SECONDS, page_audio_capture_path());
-    system_exec(buf);
+    ok = system_exec(buf) == 0;
 #endif
+    // The record daemon holds the codec's capture while Stream Audio streams or HDMI Out Audio runs its
+    // bridge (docs/live-audio.md): the capture fails then, and there is nothing to play back
+    if (!ok || fs_filesize(page_audio_capture_path()) <= 44) {
+        LOGE("audio test: nothing recorded (the audio input busy: Stream Audio, HDMI Out Audio?)");
+        return false;
+    }
+    return true;
 }
 
 static void *page_audio_test_thread(void *arg) {
@@ -808,7 +857,10 @@ static void *page_audio_test_thread(void *arg) {
     switch (mode) {
     case AUDIO_TEST_MIC:
         dvr_mute_live_audio();
-        page_audio_capture_wav(SETTING_RECORD_AUDIO_SOURCE_MIC);
+        if (!page_audio_capture_wav(SETTING_RECORD_AUDIO_SOURCE_MIC)) {
+            audio_test_busy = true;
+            break;
+        }
         page_audio_enable_dac_playback();
         audio_test_phase_duration_ms = AUDIO_TEST_SECONDS * 1000;
         audio_test_phase = AUDIO_TEST_PHASE_PLAYING;
@@ -825,7 +877,10 @@ static void *page_audio_test_thread(void *arg) {
     }
     case AUDIO_TEST_LINE_AV:
         dvr_mute_live_audio();
-        page_audio_capture_wav(SETTING_RECORD_AUDIO_SOURCE_LINE_IN);
+        if (!page_audio_capture_wav(SETTING_RECORD_AUDIO_SOURCE_LINE_IN)) {
+            audio_test_busy = true;
+            break;
+        }
         page_audio_enable_dac_playback();
         audio_test_phase_duration_ms = AUDIO_TEST_SECONDS * 1000;
         audio_test_phase = AUDIO_TEST_PHASE_PLAYING;
@@ -858,6 +913,7 @@ static void page_audio_run_test(void) {
     active_test_mode = mode;
     audio_test_phase = AUDIO_TEST_PHASE_IDLE;
     audio_test_update_ms = 0;
+    audio_test_busy = false;
     audio_test_running = true;
     if (pthread_create(&tid, NULL, page_audio_test_thread, (void *)(intptr_t)mode) == 0) {
         pthread_detach(tid);
@@ -898,6 +954,7 @@ static void page_audio_exit(void) {
     release_slider(false);
     audio_mixer_save();
     selected_test_active = false;
+    audio_test_busy = false;
     // previewed from the main menu as when it was first shown: from the top, no hint
     lv_label_set_text(hint, "");
     lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
@@ -1023,6 +1080,9 @@ static void page_audio_on_click(uint8_t key, int sel) {
         app_state_push(APP_STATE_SUBMENU_ITEM_FOCUSED);
         break;
     case ROW_HDMI_OUT:
+        // On only with the read-only probe's GO for this board (its hint says so); Off always
+        if (!hdmi_audio_out_enabled() && !hdmi_audio_out_allowed())
+            break;
         // stored only: in effect from the next start (core/hdmi_audio.h)
         hdmi_audio_set(!hdmi_audio_out_enabled(), hdmi_audio_in_enabled());
         update_rows();

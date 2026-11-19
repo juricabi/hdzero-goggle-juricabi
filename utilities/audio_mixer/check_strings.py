@@ -48,15 +48,19 @@ def page_strings():
             out.append(("label", m.group(1)))
         if m.group(2):
             out.append(("hint", m.group(2)))
-    notes = 0
     for m in re.finditer(r'^#define HINT_\w+\s+"([^"]+)"', src, re.M):
-        if "\\n" in m.group(1):
-            # ripples' note of the test buttons: one key, shown as lines of their own in ripples' font;
-            # the first for Goggle 2 / BoxPro, the second (#else) for the Goggle 1 only
-            out.append(("note_lines" if notes == 0 else "note_lines_goggle1", m.group(1).replace("\\n", "\n")))
-            notes += 1
-        else:
-            out.append(("hint", m.group(1)))
+        out.append(("hint", m.group(1)))
+    # ripples' note of the test buttons: a key per line, each shown as a line of its own in ripples' font;
+    # the first array for Goggle 2 / BoxPro, the second (#else) for the Goggle 1 only
+    arrays = re.findall(r'^static const char \*const HINT_TEST\[\] = \{(.*?)\};', src, re.M | re.S)
+    if len(arrays) != 2:
+        raise SystemExit(f"page_audio.c: {len(arrays)} HINT_TEST arrays, want 2 (Goggle 2 / BoxPro, Goggle 1)")
+    first = re.findall(r'"([^"]+)"', arrays[0])
+    out += [("note", line) for line in first]
+    out += [("note_goggle1", line) for line in re.findall(r'"([^"]+)"', arrays[1]) if line not in first]
+    # a test that recorded nothing: its message and the two rows that hold the input
+    busy = re.search(r'^#define HINT_TEST_BUSY\s+"([^"]+)"', src, re.M).group(1)
+    out.append(("hint", ("{} ({}, {})", (busy, "Stream Audio", "HDMI Out Audio"))))
     # ripples' Audio Source (its label and three buttons as one row) and test buttons
     out.append(("source_row", ("{}|{}|{}|{}", ("Audio Source", "Mic", "Line In", "A/V In"))))
     out += [("test_button", b) for b in ("DVR", "Live", "Mic", "Line/AV")]
@@ -73,10 +77,10 @@ def page_strings():
 
 
 NUMBERS = ["+6.0 dB", "-4.5 dB", "10"]  # widest values, shown as they are in every language
-# ripples' own strings that ripples 1.2.2's language files do not translate: shown in English as there
-RIPPLES_UNTRANSLATED = {"Volume Control", "DVR Playback", "Live Volume", "Mic Gain", "Line/AV Gain", "Run Test",
-                        "DVR", "Live", "Line/AV"}
-HDMI_FAULTS = ["pin check failed", "HDMI chip check failed", "audio path failed"]
+# ripples' own strings that ripples 1.2.2's language files do not translate are translated here since
+# phase 4 (its nine labels and its note): none is left in English
+RIPPLES_UNTRANSLATED = set()
+HDMI_FAULTS = ["pin check failed", "HDMI chip check failed", "audio path failed", "probe not run"]
 
 # The Module Bay page (src/ui/page_modulebay.c, src/module/*.c): (kind, text) or (kind, (format,
 # keys)) for a text put together from translated parts. Goggles only.
@@ -103,7 +107,7 @@ WIFI = [("wifi_label", "Stream Audio"), ("wifi_note", ("{}.", ("Stream Audio: so
 
 
 def is_ripples_untranslated(text):
-    return isinstance(text, str) and (text in RIPPLES_UNTRANSLATED or text.startswith("1. Mic: record 5s"))
+    return isinstance(text, str) and text in RIPPLES_UNTRANSLATED
 
 
 def translations(path):
@@ -189,22 +193,24 @@ def main():
         out = []
         for lang, table in langs.items():
             for kind, text in strings:
-                shown = english(text) if lang == "en" or text in NUMBERS else translate(text, table)
+                # a line of ripples' note is keyed with '-' for '=' (page_audio.c note_line())
+                key = text.replace("=", "-") if kind.startswith("note") else text
+                shown = english(text) if lang == "en" or text in NUMBERS else translate(key, table)
                 if shown is None and is_ripples_untranslated(text):
                     shown = english(text)  # as on ripples
                 if shown is None:
-                    missing = [k for k in keys_of(text) if k not in table]
+                    missing = [k for k in keys_of(key) if k not in table]
                     problems.append(f"not translated in {lang}: {missing}")
                     shown = english(text)  # the firmware shows the English text
-                if kind.startswith("note_lines"):
-                    out += [f"note\t{lang}\t{line}" for line in shown.split("\n")]
+                if kind.startswith("note"):
+                    out.append(f"note\t{lang}\t{shown}")
                 else:
                     out.append(f"{kind}\t{lang}\t{shown}")
         return out
 
     # the Module Bay page exists on the goggles only
     per_target = {"HDZGOGGLE2": strings + MODULE_BAY + WIFI,
-                  "HDZBOXPRO": [s for s in strings if s[0] != "note_lines_goggle1"] + WIFI}
+                  "HDZBOXPRO": [s for s in strings if s[0] != "note_goggle1"] + WIFI}
     lines = {target: lines_of(s) for target, s in per_target.items()}
     problems = sorted(set(problems), key=problems.index)
 
@@ -244,8 +250,6 @@ def main():
     for p in problems:
         print("FAIL " + p)
     count = sum(len(s) for s in per_target.values())
-    print(f"(shown in English as on ripples 1.2.2, not translated there: {sorted(RIPPLES_UNTRANSLATED)} and the "
-          f"test buttons' note)")
     print(f"{count} strings (both layouts) x {len(langs)} languages: "
           + ("all fit" if not problems else f"{len(problems)} problems"))
     return 1 if problems else 0
