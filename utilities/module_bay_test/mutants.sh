@@ -50,5 +50,26 @@ run "unreadable pin function shown as WiFi" module.c 's/status = pins_unknown \?
 # ripples: every bay power command is reported; Dual uses the built-in receiver
 run "a repeated power report sets the module up again" module.c 's/    if \(bay_powered == \(on != 0\)\) \{\n        pthread_mutex_unlock\(&lock\);\n        return; \/\/ \(the bay was in that state already\)\n    \}\n//'
 run "Dual counted as the bay being the source" module.c 's/ &&\n           !g_setting.source.auto_protocol_detect;/;/'
+# src/core/elrs.c: the answers to the backpack's channel queries (test_msp_answers.py; review of phase 3, finding 9)
+run_elrs() { # name perl-expression
+    n=$((n + 1))
+    local d=$O/m$n
+    mkdir -p "$d"
+    cp "$W/src/core/elrs.c" "$d/elrs.c"
+    perl -0pi -e "$2" "$d/elrs.c"
+    if cmp -s "$d/elrs.c" "$W/src/core/elrs.c"; then
+        echo "NOT APPLIED $1"
+        bad=1
+        return
+    fi
+    if python3 "$HERE/test_msp_answers.py" "$d/elrs.c" > "$d/log" 2>&1; then
+        echo "SURVIVED $1"
+        bad=1
+    else
+        echo "killed   $1: $(grep -m1 -E '^FAIL|error:' "$d/log" | sed 's/  */ /g')"
+    fi
+}
+run_elrs "MSP: 255 / 0 Hz for a bay module not controlled (as at c3e0860)" 's/ : g_setting.source.analog_channel;/ : 0;/'
+run_elrs "MSP: the stored channel also for a tuned bay module" 's/return analog_channel_tunable\(\) \? \(uint8_t\)analog_channel_get\(\) :/return 0 ? 0 :/'
 echo "$n mutants"
 exit $bad
