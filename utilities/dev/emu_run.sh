@@ -4,7 +4,8 @@
 # Outer part (root, host namespaces): starts our own Xvfb on the first free display from :800,
 # then re-executes itself in a private mount namespace (unshare -m) where:
 #   /mnt is a fresh tmpfs (hides /mnt/c, /mnt/app); /mnt/app/language and /mnt/app/resource are
-#   read-only bind mounts of the worktree's; no /mnt/app/script; /mnt/extsd is an empty dir
+#   read-only bind mounts of the worktree's; no /mnt/app/script; /mnt/extsd is an empty dir (or holds
+#   a copy of $EMU_EXTSD_FILE)
 #   /tmp is a fresh tmpfs (the X socket dir bind-mounted back in)
 #   the emulator binary, the stubs and the run dir live in that private /tmp, owned by 65534
 # and the emulator runs as uid/gid 65534 with no groups, no capabilities (inheritable, ambient,
@@ -49,7 +50,12 @@ mount --bind -o ro $SRC/mkapp/app/language /mnt/app/language
 mount -o remount,bind,ro /mnt/app/language
 mount --bind -o ro $SRC/mkapp/app/resource /mnt/app/resource
 mount -o remount,bind,ro /mnt/app/resource
-chown 65534:65534 /mnt/extsd
+# EMU_EXTSD_FILE=<file>: a copy of it in the SD card directory (e.g. the HDMI audio probe's
+# hdmi_audio_go.txt, the HDMI Out Audio row with and without it)
+if [ -n "${EMU_EXTSD_FILE:-}" ]; then
+  cp "$EMU_EXTSD_FILE" /mnt/extsd/ || { echo "EMU_EXTSD_FILE $EMU_EXTSD_FILE not copied"; exit 1; }
+fi
+chown -R 65534:65534 /mnt/extsd
 
 ST=/tmp/stubs
 mkdir -p $ST
