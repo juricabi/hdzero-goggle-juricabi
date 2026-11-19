@@ -148,6 +148,29 @@ static void cset(cmd_buf_t *cb, const char *name, int value) {
         cb->len += (size_t)n;
 }
 
+size_t audio_mixer_build_held_commands(char *buf, size_t size) {
+    // The live paths the mixer itself connects, out: what ripples' playback and tests do not switch
+    // themselves (adec2ao.c and dvr_mute_live_audio() cut only LINEIN; libmedia_mpp's reset touches
+    // none of these but the left DAC switch, which it sets again for the file), so that no headphone
+    // source of the Audio page is heard with a DVR file or a test sample, and a test records only the
+    // source it routes. Line out, volumes and the ADC inputs stay: ripples' code sets them.
+    static const char *const off[] = {
+        "Left Output Mixer MIC1Booststage Switch", "Right Output Mixer MIC1Booststage Switch",
+        "Left Output Mixer MIC2Booststage Switch", "Right Output Mixer MIC2Booststage Switch",
+        "Left Output Mixer LINEINL Switch",        "Right Output Mixer LINEINR Switch",
+        "Left Output Mixer DACL Switch",           "Right Output Mixer DACR Switch",
+        "Left Output Mixer DACR Switch",           "Right Output Mixer DACL Switch",
+        "LADC input Mixer l_output mixer Switch",  "RADC input Mixer r_output mixer Switch",
+        "LADC input Mixer r_output mixer Switch",  "RADC input Mixer l_output mixer Switch",
+    };
+    cmd_buf_t cb = {.buf = buf, .size = size, .len = 0};
+    if (buf && size)
+        buf[0] = 0;
+    for (size_t i = 0; i < sizeof(off) / sizeof(off[0]); i++)
+        cset(&cb, off[i], 0);
+    return cb.len;
+}
+
 size_t audio_mixer_build_commands(const audio_mixer_settings_t *settings, const audio_mixer_context_t *context, char *buf, size_t size) {
     cmd_buf_t cb = {.buf = buf, .size = size, .len = 0};
     int v[AUDIO_MIXER_FIELD_COUNT];
@@ -257,6 +280,11 @@ size_t audio_mixer_build_commands(const audio_mixer_settings_t *settings, const 
     cset(&cb, "ADC input gain control", adc_gain);
     cset(&cb, "ADC volume", DIGITAL_VOLUME_OLD);
     cset(&cb, "DAC volume", dac_volume);
+    // the digital volume of both AIF1 DAC timeslots: ripples' DVR Playback sets them for a file or a
+    // test (dvr_set_dvr_audio_volume(), the test's timeslot 1 at 0); HDMI-in audio plays through
+    // timeslot 0 at the stock 0 dB
+    cset(&cb, "AIF1 DAC timeslot 0 volume", DIGITAL_VOLUME_OLD);
+    cset(&cb, "AIF1 DAC timeslot 1 volume", DIGITAL_VOLUME_OLD);
 
     // 3. every path that is on
     for (size_t i = 0; i < sw_count; i++)

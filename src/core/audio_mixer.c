@@ -107,8 +107,14 @@ static uint64_t recheck_until_ms; // audio_mixer_recheck(): full passes, often, 
 static char last_batch[4096]; // what the codec should have (batch_mutex)
 static bool have_batch;
 static bool batch_failed; // amixer did not run or failed: the codec may not have last_batch
-static bool held;         // audio_mixer_hold(): written under batch_mutex and mixer_mutex
+static unsigned held;     // audio_mixer_hold(): one bit per holder, written under batch_mutex and mixer_mutex
 static bool section_written; // setting.ini has a [mixer] of this version (UI thread)
+// What setting.ini has in [record] for ripples (audio_source, live_audio_volume as stock ripples reads
+// them), and the values of [mixer] record_source / record_live (NO_KEY: none): the [record] values the
+// [mixer] values were written with (UI thread)
+static long file_source, file_live, file_basis_source, file_basis_live;
+static unsigned stale; // fields that follow stock ripples' newer [record] values: written with the next change
+static unsigned in_file; // [mixer] fields setting.ini has (the others follow [record] at every start)
 static unsigned codec_reads; // controls read by the watcher (host test: the cost of a pass)
 
 static void start_worker(void);
@@ -130,6 +136,7 @@ static int clamp_field(audio_mixer_field_t field, long value) {
 }
 
 #define NO_KEY (-999999L)
+#define FIELD_BIT(field) (1u << (field))
 static bool has_key(const char *section, const char *key) {
     return ini_getl(section, key, NO_KEY, SETTING_INI) != NO_KEY;
 }
@@ -154,6 +161,12 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
     audio_mixer_defaults(&defaults, rec);
 
     const long version = ini_getl(AUDIO_MIXER_SECTION, "version", 0, SETTING_INI);
+    file_source = rec->audio_source;
+    file_live = rec->live_volume;
+    file_basis_source = ini_getl(AUDIO_MIXER_SECTION, "record_source", NO_KEY, SETTING_INI);
+    file_basis_live = ini_getl(AUDIO_MIXER_SECTION, "record_live", NO_KEY, SETTING_INI);
+    stale = 0;
+    in_file = 0;
     if (version < AUDIO_MIXER_VERSION) {
         // No [mixer] yet (stock ripples, fresh install), one of a test build of all's, or one cut short
         // before its version was written: ripples' behaviour of these settings, whatever the section
@@ -161,6 +174,7 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
         // the Audio page (audio_mixer_save()). A section that is there (old keys of version 1, stale
         // fields) goes, in one write.
         mixer = defaults;
+        file_basis_source = file_basis_live = NO_KEY; // (a section of another version is no basis)
         char key[32];
         if (ini_getkey(AUDIO_MIXER_SECTION, 0, key, sizeof(key), SETTING_INI) > 0)
             ini_puts(AUDIO_MIXER_SECTION, NULL, NULL, SETTING_INI);
@@ -174,7 +188,26 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
         for (int i = 0; i < AUDIO_MIXER_FIELD_COUNT; i++) {
             if (strcmp(field_ini[i].section, AUDIO_MIXER_SECTION) != 0)
                 continue;
+            if (has_key(AUDIO_MIXER_SECTION, field_ini[i].key))
+                in_file |= FIELD_BIT(i);
             mixer.value[i] = clamp_field(i, ini_getl(AUDIO_MIXER_SECTION, field_ini[i].key, defaults.value[i], SETTING_INI));
+        }
+        // Stock ripples changed its Audio Source (Live Volume) since this firmware wrote [mixer]: the
+        // Record switches and the receiver's audio (the A/V In level) as that row sets them, from the
+        // new value; written with the next change on the page
+        if (file_basis_source != NO_KEY && file_basis_source != rec->audio_source) {
+            static const audio_mixer_field_t preset[] = {AUDIO_MIXER_REC_MIC, AUDIO_MIXER_REC_LINE_IN, AUDIO_MIXER_REC_AV,
+                                                         AUDIO_MIXER_RX_AUDIO};
+            for (size_t i = 0; i < sizeof(preset) / sizeof(preset[0]); i++) {
+                mixer.value[preset[i]] = defaults.value[preset[i]];
+                stale |= FIELD_BIT(preset[i]);
+            }
+            LOGI("audio mixer: [record] audio_source %d since record_source %ld: its preset", rec->audio_source, file_basis_source);
+        }
+        if (file_basis_live != NO_KEY && file_basis_live != rec->live_volume) {
+            mixer.value[AUDIO_MIXER_AV] = defaults.value[AUDIO_MIXER_AV];
+            stale |= FIELD_BIT(AUDIO_MIXER_AV);
+            LOGI("audio mixer: [record] live_audio_volume %d since record_live %ld: A/V In by its curve", rec->live_volume, file_basis_live);
         }
         // A setting.ini of all's firmware has none of ripples' keys, but all's equivalents in [mixer]
         // (docs/audio.md): taken over in memory, written only when changed on the page
@@ -192,8 +225,9 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
             rec->dvr_volume = dvr_volume_of_playback(ini_getl(AUDIO_MIXER_SECTION, "playback", 27, SETTING_INI));
         // the Audio Source row shows the one source recorded directly, if there is one (all's firmware
         // left [record] audio_source as it was before its Record switches)
+        // (one of this firmware: [record] audio_source is the row's own value, as written)
         const int direct = mixer.value[AUDIO_MIXER_REC_MIC] + mixer.value[AUDIO_MIXER_REC_LINE_IN] + mixer.value[AUDIO_MIXER_REC_AV];
-        if (direct == 1)
+        if (direct == 1 && file_basis_source == NO_KEY)
             mixer.value[AUDIO_MIXER_SOURCE] = mixer.value[AUDIO_MIXER_REC_MIC] ? 0 : (mixer.value[AUDIO_MIXER_REC_LINE_IN] ? 1 : 2);
         LOGI("audio mixer: [mixer] version %ld, record/audio_source=%d", version, rec->audio_source);
     }
@@ -279,12 +313,60 @@ void audio_mixer_save(void) {
     const audio_mixer_settings_t current = mixer;
     pthread_mutex_unlock(&mixer_mutex);
 
+    if (memcmp(&current, &saved, sizeof(current)) == 0)
+        return; // no change: nothing written
     bool wrote_mixer = false;
     for (int i = 0; i < AUDIO_MIXER_FIELD_COUNT; i++) {
-        if (current.value[i] != saved.value[i]) {
+        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i))) {
             ini_putl(field_ini[i].section, field_ini[i].key, current.value[i], SETTING_INI);
             saved.value[i] = current.value[i];
-            wrote_mixer |= strcmp(field_ini[i].section, AUDIO_MIXER_SECTION) == 0;
+            if (strcmp(field_ini[i].section, AUDIO_MIXER_SECTION) == 0) {
+                wrote_mixer = true;
+                in_file |= FIELD_BIT(i);
+            }
+            if (i == AUDIO_MIXER_SOURCE)
+                file_source = current.value[i];
+            if (i == AUDIO_MIXER_LIVE_VOLUME)
+                file_live = current.value[i];
+        }
+    }
+    stale = 0;
+    // A [mixer] field setting.ini does not have comes from [record] at the next start (Audio Source,
+    // Live Volume): one that would then differ from its value now is written too (Audio Source Line
+    // In, then Record Mic Yes again: the Line In preset would turn it off)
+    const audio_mixer_record_t file_rec = {.audio_source = (int)file_source, .live_volume = (int)file_live,
+                                           .mic_gain = current.value[AUDIO_MIXER_MIC_GAIN],
+                                           .linein_gain = current.value[AUDIO_MIXER_LINEIN_GAIN]};
+    audio_mixer_settings_t from_record;
+    audio_mixer_defaults(&from_record, &file_rec);
+    for (int i = 0; i < AUDIO_MIXER_FIELD_COUNT; i++) {
+        if (strcmp(field_ini[i].section, AUDIO_MIXER_SECTION) == 0 && !(in_file & FIELD_BIT(i)) &&
+            from_record.value[i] != current.value[i]) {
+            ini_putl(AUDIO_MIXER_SECTION, field_ini[i].key, current.value[i], SETTING_INI);
+            in_file |= FIELD_BIT(i);
+            wrote_mixer = true;
+        }
+    }
+    if (wrote_mixer || section_written) {
+        // [record] as the page shows it (a value taken over from all's firmware), and the [record]
+        // values these [mixer] values belong to: stock ripples changing them is seen at the next start
+        if (file_source != current.value[AUDIO_MIXER_SOURCE]) {
+            file_source = current.value[AUDIO_MIXER_SOURCE];
+            ini_putl(RECORD_SECTION, "audio_source", file_source, SETTING_INI);
+        }
+        if (file_live != current.value[AUDIO_MIXER_LIVE_VOLUME]) {
+            file_live = current.value[AUDIO_MIXER_LIVE_VOLUME];
+            ini_putl(RECORD_SECTION, "live_audio_volume", file_live, SETTING_INI);
+        }
+        if (file_basis_source != file_source) {
+            file_basis_source = file_source;
+            ini_putl(AUDIO_MIXER_SECTION, "record_source", file_basis_source, SETTING_INI);
+            wrote_mixer = true;
+        }
+        if (file_basis_live != file_live) {
+            file_basis_live = file_live;
+            ini_putl(AUDIO_MIXER_SECTION, "record_live", file_basis_live, SETTING_INI);
+            wrote_mixer = true;
         }
     }
     // the first change in [mixer]: the version last, so that a section cut short by a power loss is
@@ -300,6 +382,26 @@ bool audio_mixer_unsaved(void) {
     const bool unsaved = memcmp(&mixer, &saved, sizeof(mixer)) != 0;
     pthread_mutex_unlock(&mixer_mutex);
     return unsaved;
+}
+
+// The command file and one amixer process for it (batch_mutex held). true: amixer ran and succeeded.
+static bool run_batch(const char *cmd, size_t len) {
+    bool ok = false;
+    FILE *fp = fopen(AUDIO_MIXER_CMD_FILE, "w");
+    if (!fp) {
+        LOGE("audio mixer: cannot write %s", AUDIO_MIXER_CMD_FILE);
+    } else {
+        const bool written = fwrite(cmd, 1, len, fp) == len;
+        if (fclose(fp) != 0 || !written) {
+            LOGE("audio mixer: cannot write %s", AUDIO_MIXER_CMD_FILE);
+        } else {
+            const int status = system_exec(AUDIO_MIXER_AMIXER);
+            ok = status == 0;
+            if (!ok)
+                LOGE("audio mixer: amixer failed (status %d): the codec may not have this routing", status);
+        }
+    }
+    return ok;
 }
 
 // Write one state to the codec: one amixer process for the whole batch. false: held, not written.
@@ -327,23 +429,7 @@ static bool write_batch(const audio_mixer_settings_t *settings, const audio_mixe
         memcpy(last_batch, cmd, len + 1);
         have_batch = true;
     }
-    bool ok = false;
-    FILE *fp = fopen(AUDIO_MIXER_CMD_FILE, "w");
-    if (!fp || len >= sizeof(cmd)) {
-        LOGE("audio mixer: cannot write %s", AUDIO_MIXER_CMD_FILE);
-        if (fp)
-            fclose(fp);
-    } else {
-        const bool written = fwrite(cmd, 1, len, fp) == len;
-        if (fclose(fp) != 0 || !written) {
-            LOGE("audio mixer: cannot write %s", AUDIO_MIXER_CMD_FILE);
-        } else {
-            const int status = system_exec(AUDIO_MIXER_AMIXER);
-            ok = status == 0;
-            if (!ok)
-                LOGE("audio mixer: amixer failed (status %d): the codec may not have this routing", status);
-        }
-    }
+    const bool ok = len < sizeof(cmd) && run_batch(cmd, len);
     if (ok && batch_failed)
         LOGI("audio mixer: amixer works again");
     batch_failed = !ok;
@@ -583,18 +669,33 @@ bool audio_mixer_apply_wait(unsigned timeout_ms) {
     return done;
 }
 
-void audio_mixer_hold(bool hold) {
+void audio_mixer_hold(audio_mixer_holder_t holder, bool hold) {
     // under batch_mutex too: a batch that is being written finishes first, none starts afterwards
     pthread_mutex_lock(&batch_mutex);
     pthread_mutex_lock(&mixer_mutex);
-    const bool changed = held != hold;
-    held = hold;
-    pthread_cond_broadcast(&work_cond);
-    pthread_cond_broadcast(&done_cond);
+    const unsigned before = held;
+    held = hold ? (held | holder) : (held & ~(unsigned)holder);
+    const bool taken = !before && held;
+    const bool released = before && !held;
+    if (taken) {
+        // a watcher pass or an apply_wait() in progress sees it now (released: the apply below wakes
+        // the worker, with every request made meanwhile: one batch)
+        pthread_cond_broadcast(&work_cond);
+        pthread_cond_broadcast(&done_cond);
+    }
     pthread_mutex_unlock(&mixer_mutex);
+    if (taken) {
+        // the mixer's own live paths out before ripples' code takes the codec (still under
+        // batch_mutex: no batch of the worker in between)
+        static char cmd[1024];
+        const size_t len = audio_mixer_build_held_commands(cmd, sizeof(cmd));
+        LOGI("audio mixer: held (0x%x): the headphone sources and the recorded mix out", held);
+        if (len >= sizeof(cmd) || !run_batch(cmd, len))
+            LOGE("audio mixer: the live paths may still be connected while held");
+    }
     pthread_mutex_unlock(&batch_mutex);
 
-    if (changed && !hold) {
+    if (released) {
         // ripples' code is done with the codec: the mixer's state again, everything set
         audio_mixer_apply_wait(1000);
     }

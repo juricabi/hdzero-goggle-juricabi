@@ -80,9 +80,13 @@ const char *audio_mixer_key(audio_mixer_field_t field);
 // Load the [mixer] settings, take over ripples' values, start the worker that writes them to the
 // codec. Without a [mixer] of version 2, the Record switches and the receiver's audio come from
 // [record] audio_source and the A/V In level from Live Volume (ripples' curve): the codec gets what
-// ripples' firmware set. A setting.ini of all's firmware ([mixer] version 2, none of ripples' keys)
-// keeps its [mixer] values, and ripples' values are filled in from all's equivalents: `rec` is
-// updated, the caller copies it back to g_setting.record. Nothing is written to setting.ini.
+// ripples' firmware set. A [mixer] written by this firmware also holds the [record] audio_source and
+// live_audio_volume its values belong to (record_source, record_live): when stock ripples changed
+// one of them since, the Record switches and the receiver's audio (or the A/V In level) follow the
+// new one again, as the Audio Source (or Live Volume) row would have set them. A setting.ini of all's
+// firmware ([mixer] version 2, none of ripples' keys) keeps its [mixer] values, and ripples' values
+// are filled in from all's equivalents: `rec` is updated, the caller copies it back to
+// g_setting.record. Nothing is written to setting.ini.
 void audio_mixer_init(audio_mixer_record_t *rec);
 
 int audio_mixer_get(audio_mixer_field_t field);
@@ -99,8 +103,10 @@ void audio_mixer_set_live_volume(int value);
 // ripples' Audio Source: record this source directly, not the other two; the built-in receiver's
 // audio on with A/V In only (ripples: rtc6715.init(1, audio_source == A/V In))
 void audio_mixer_set_source(int source);
-// Write the values changed since the last save to setting.ini. Call it from the UI, which
-// writes the other settings (under lvgl_mutex), never from the worker.
+// Write the values changed since the last save to setting.ini (nothing without a change). Call it
+// from the UI, which writes the other settings (under lvgl_mutex), never from the worker. With a
+// change, values that only follow stock ripples' newer [record] values (audio_mixer_init()) are
+// written too, and the [record] values the [mixer] values belong to.
 void audio_mixer_save(void);
 bool audio_mixer_unsaved(void);
 
@@ -116,9 +122,20 @@ bool audio_mixer_apply_wait(unsigned timeout_ms);
 // codec that cannot be read, an amixer that fails, or a codec that does not keep a value: logged,
 // tried again with a backoff up to 60 s, never given up.
 
-// ripples' own codec code runs (DVR playback, the Audio page's test buttons): no batch and no
-// watching while held; released, the current state is applied (and waited for, at most 1 s).
-void audio_mixer_hold(bool hold);
+// ripples' own codec code runs (DVR playback, the Audio page's test buttons). Each holder has its
+// own bit, so one releasing does not end another's hold. The first hold takes the mixer's own live
+// paths out of the codec's mixers (one small batch: the mic, Line In, A/V In and DAC switches of the
+// output mixers, and the output mixers' switches into the ADC), so that ripples' code finds the
+// mixers as ripples' firmware left them: nothing but what it routes itself is heard or recorded.
+// Then no batch and no watching while anybody holds; the last release applies the current state
+// (and waits for it, at most 1 s), which also sets every one of those switches again.
+typedef enum {
+    AUDIO_MIXER_HOLD_PLAYBACK = 1 << 0, // ui_player.c: ripples' DVR playback (player/adec2ao.c)
+    AUDIO_MIXER_HOLD_TEST = 1 << 1,     // page_audio.c: the test buttons
+} audio_mixer_holder_t;
+void audio_mixer_hold(audio_mixer_holder_t holder, bool hold);
+// The batch of the first hold (amixer -s syntax); returns the length like snprintf.
+size_t audio_mixer_build_held_commands(char *buf, size_t size);
 
 // The record daemon is (re)started now or within a few seconds (Storage page scripts): compare the
 // whole codec at once and every 50 ms for the next 6 s.

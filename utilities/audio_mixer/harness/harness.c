@@ -21,8 +21,10 @@
  *   recheck                audio_mixer_recheck() (the record daemon is being restarted)
  *   apply | save | wait | rx | dump | unsaved | preset | mark (prints MARK)
  *   set <key> <value> | get <key> | set_live <value> | set_source <value>
- *   line_out <0|1> | live_dac <0|1> | hold <0|1>
- *   hold_before_batch      the next batch: audio_mixer_hold(true) from the worker right before it
+ *   line_out <0|1> | live_dac <0|1>
+ *   hold <0|1>             audio_mixer_hold() of the player (AUDIO_MIXER_HOLD_PLAYBACK)
+ *   hold_test <0|1>        audio_mixer_hold() of the Audio page's tests (AUDIO_MIXER_HOLD_TEST)
+ *   hold_before_batch      the next batch: the player's hold from the worker right before it
  *                          (after the state was taken: the window write_batch()'s check guards)
  *   inmix <rec key>        is that source recorded through the headphone mix (the page's marker)
  *   sleep <ms>             let the worker run (watcher)
@@ -100,7 +102,7 @@ static void codec_set(const char *name, int value) {
 // the mixer's hook (AUDIO_MIXER_TEST_HOOKS), in the worker: the state taken, the batch not written yet
 void audio_mixer_test_before_batch(void) {
     if (__atomic_exchange_n(&hold_before_batch, 0, __ATOMIC_SEQ_CST))
-        audio_mixer_hold(true);
+        audio_mixer_hold(AUDIO_MIXER_HOLD_PLAYBACK, true);
 }
 
 int audio_mixer_codec_read(const char *name, int *value) {
@@ -306,7 +308,9 @@ int main(void) {
         } else if (sscanf(line, "live_dac %d", &value) == 1) {
             audio_mixer_set_live_dac(value != 0);
         } else if (sscanf(line, "hold %d", &value) == 1) {
-            audio_mixer_hold(value != 0);
+            audio_mixer_hold(AUDIO_MIXER_HOLD_PLAYBACK, value != 0);
+        } else if (sscanf(line, "hold_test %d", &value) == 1) {
+            audio_mixer_hold(AUDIO_MIXER_HOLD_TEST, value != 0);
         } else if (strcmp(line, "hold_before_batch") == 0) {
             __atomic_store_n(&hold_before_batch, 1, __ATOMIC_SEQ_CST);
         } else if (sscanf(line, "sleep %d", &value) == 1) {
