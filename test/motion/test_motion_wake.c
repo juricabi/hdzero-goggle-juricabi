@@ -11,13 +11,16 @@ static int power_on_calls, power_off_calls, tune_calls;
 static int hdz_open_calls, hdz_close_calls, hdz_tune_calls;
 static bool idle_inhibited;
 static int expected_rx;
+static bool rx_audio; // the audio mixer's Built-in RX Audio (ripples-all), set by the test
 static uint8_t brightness;
 
 static void analog_init(bool power, bool audio) {
     assert(idle_inhibited);
     if (power) {
         power_on_calls++;
-        assert(audio == (g_setting.record.audio_source == SETTING_RECORD_AUDIO_SOURCE_AV_IN));
+        // ripples-all: the receiver's audio is the Audio page's Built-in RX Audio, which may differ
+        // from what ripples' Audio Source would give (on with A/V In)
+        assert(audio == rx_audio);
     } else {
         power_off_calls++;
         assert(!audio);
@@ -58,9 +61,8 @@ void DM6302_SetChannel(uint8_t band, uint8_t channel) {
     hdz_tune_calls++;
 }
 void beep_dur(int ms) {}
-// the audio mixer (ripples-all): Built-in RX Audio, as ripples' Audio Source presets it (A/V In: on), which is
-// what ht.c must hand the receiver on power-on
-bool audio_mixer_rx_audio(void) { return g_setting.record.audio_source == SETTING_RECORD_AUDIO_SOURCE_AV_IN; }
+// the audio mixer (ripples-all): Built-in RX Audio, what ht.c must hand the receiver on power-on
+bool audio_mixer_rx_audio(void) { return rx_audio; }
 int log_printf(const char *file, const char *func, int line, const int level, const char *fmt, ...) { return 0; }
 
 int main(int argc, char **argv) {
@@ -103,6 +105,9 @@ int main(int argc, char **argv) {
     for (int cycle = 0; cycle < 2; cycle++) {
         g_setting.source.analog_channel = cycle ? 48 : 1;
         g_setting.record.audio_source = cycle ? SETTING_RECORD_AUDIO_SOURCE_AV_IN : SETTING_RECORD_AUDIO_SOURCE_MIC;
+        // Built-in RX Audio set against the Audio Source's preset (on with Mic, off with A/V In): the
+        // receiver must get the mixer's value, not one derived from the Audio Source
+        rx_audio = !cycle;
         power_on_calls = power_off_calls = tune_calls = 0;
         hdz_open_calls = hdz_close_calls = hdz_tune_calls = 0;
         for (int tick = 0; tick < 2 * MOTION_DUR_1MINUTE + 1; tick++)
