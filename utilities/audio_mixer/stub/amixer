@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stub amixer for dry runs (host or emulator): logs the arguments and the
+# commands read from stdin to $AMIXER_LOG (default ./amixer.log), changes nothing.
+LOG=${AMIXER_LOG:-amixer.log}
+{
+    echo "### $(date '+%H:%M:%S') amixer $*"
+    case " $* " in
+    *" -s "* | *" --stdin "*) cat ;;
+    esac
+} >> "$LOG"
+exit 0

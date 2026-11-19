@@ -1,0 +1,49 @@
+# Goggle 2 or BoxPro (ripples-all), started in the main menu: Audio page, changes (c00 before, c01..c04 after each),
+# then left (c09); the keys written as below from ripples' setting.ini (another start writes its own values):
+#  1. Mic (the 8th row) one step up: [mixer] mic=1, phones_at_boot=1, version=2
+#  2. Record Headphone Mix (4 rows below) Yes: [mixer] rec_mix=1
+#  3. Audio Source (the 2nd row) once: Line In: [record] audio_source=1, [mixer] rec_mic=0, rec_line_in=1
+#  4. Live Volume (the 4th row) one step down: [record] live_audio_volume=9, [mixer] av by ripples' curve
+#  5. Run Test, DVR: ripples' test with the mixer held (the emulator has no codec: nothing to hear)
+w 2
+c c00
+k s 7
+w 1
+k d
+w 1
+k s 7
+k d
+k w
+w 1
+s b01_mic_grabbed
+k d
+w 1
+c c01
+k s 4
+k d
+w 1
+s b02_rec_mix
+c c02
+k w 10
+k d
+w 1
+s b03_audio_source
+c c03
+k s 2
+k d
+k s
+w 1
+k d
+w 1
+s b04_live_volume
+c c04
+k s 3
+k d
+w 1
+k d
+w 3
+s b05_test
+l d
+w 1
+c c09
+w 2
