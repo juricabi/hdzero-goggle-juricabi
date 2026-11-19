@@ -93,6 +93,7 @@ static int read_record_status(void) {
 }
 
 static uint64_t monotonic_ms(void);
+static void dvr_dbg_log(const char *fmt, ...);
 
 // juricabi: ripples waited a fixed 2 s after every start and stop command to the recorder ("wait for
 // record process"). Now only until the recorder's status file says it has started (1, or an error: 3
