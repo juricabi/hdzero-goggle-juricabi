@@ -108,6 +108,8 @@ int log_printf(const char *file, const char *func, int line, const int level, co
 __attribute__((constructor)) static void stub_init(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     gT0 = now_us();
+    // the log's time 0 on CLOCK_MONOTONIC: a test can put an event of its own on the log's clock (t_kill.sh)
+    stub_log("log clock: T0 %llu us CLOCK_MONOTONIC", (unsigned long long)gT0);
 }
 
 int log_open(void) { return 0; }

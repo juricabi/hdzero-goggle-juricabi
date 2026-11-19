@@ -5,22 +5,27 @@
 #   TERM  killall rtspLive (wlan_stop.sh one second after the quit message)
 #   KILL  no handler at all (also what a crash or an rtspLive without the exit handlers leaves)
 # Then a new rtspLive must stream both tracks again.
+# The stop times are measured on the recorder's own log clock: each log line carries its time since the
+# recorder's T0, which the stub logs on CLOCK_MONOTONIC ("log clock: T0"); $BIN/mono reads that clock right
+# before the trigger. (Polling the log on the wall clock measured the polling too, on a busy host.)
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 L=$LOGS/kill
 rm -rf "$L"; mkdir -p "$L"
 cleanup_ipc
 
-# wait_log FILE PATTERN AFTER_LINE TIMEOUT -> seconds until a line matching PATTERN after line AFTER_LINE
-wait_log() {
-    local t0 t
-    t0=$(date +%s.%N)
-    while :; do
-        if tail -n +"$(( $3 + 1 ))" "$1" | grep -q "$2"; then
-            t=$(date +%s.%N); echo "$t - $t0" | bc | sed 's/^\./0./'; return 0
-        fi
-        if [ "$(echo "$(date +%s.%N) - $t0 > $4" | bc)" = 1 ]; then echo "timeout"; return 1; fi
+# stop_after FILE PATTERN AFTER_LINE TRIGGER_US TIMEOUT -> seconds from the trigger (CLOCK_MONOTONIC us) to the
+# first line matching PATTERN after line AFTER_LINE, by the line's own log time; "timeout" if none within TIMEOUT s
+stop_after() {
+    local t0 i line
+    t0=$(grep -m1 "log clock: T0" "$1" | sed 's/.*T0 \([0-9]*\) us.*/\1/')
+    [ -n "$t0" ] || { echo "no-clock"; return 1; }
+    for (( i = 0; i < $5 * 20; i++ )); do
+        line=$(tail -n +"$(( $3 + 1 ))" "$1" | grep -m1 "$2")
+        [ -n "$line" ] && break
         sleep 0.05
     done
+    [ -n "$line" ] || { echo "timeout"; return 1; }
+    awk -v s="${line%% \[*}" -v t0="$t0" -v tk="$4" 'BEGIN { printf "%.3f\n", s - (tk - t0) / 1e6 }'
 }
 le() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a <= b) }'; }
 
@@ -35,12 +40,13 @@ for how in quit TERM KILL; do
     for _ in $(seq 100); do grep -q "liveaudio_onFrame\] first frame" "$L/record_$how.log" && break; sleep 0.1; done
     sleep 3
     n=$(wc -l < "$L/record_$how.log")
+    tk=$("$BIN/mono")
     case $how in
         quit) gmsg_live quit ;;
         *) kill -"$how" "$LIVE_PID" ;;
     esac
-    tv=$(wait_log "$L/record_$how.log" "vi2venc_stop (live" "$n" 8)
-    ta=$(wait_log "$L/record_$how.log" "liveaudio_stop\] stopped" "$n" 8)
+    tv=$(stop_after "$L/record_$how.log" "vi2venc_stop (live" "$n" "$tk" 8)
+    ta=$(stop_after "$L/record_$how.log" "liveaudio_stop\] stopped" "$n" "$tk" 8)
     echo "  live video encoder stopped after $tv s, live audio chain after $ta s"
     lim=1.0; [ $how = KILL ] && lim=1.5
     le "${tv/timeout/99}" $lim; check $? "$how: live video encoder stopped within $lim s [$tv s]"
