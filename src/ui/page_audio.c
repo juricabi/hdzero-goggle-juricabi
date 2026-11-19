@@ -5,13 +5,16 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <log/log.h>
 #include <minIni.h>
 
 #include "../conf/ui.h"
 
 #include "core/app_state.h"
+#include "core/audio_mixer.h"
 #include "core/common.hh"
 #include "core/dvr.h"
+#include "core/hdmi_audio.h"
 #include "lang/language.h"
 #include "page_common.h"
 #include "ui/ui_style.h"
@@ -19,10 +22,27 @@
 #include "util/system.h"
 #include "wav_test.h"
 
-#define AUDIO_VOLUME_MIN 0
+/*
+ * Audio page, ripples-all: ripples' page (Record Audio, Audio Source, DVR Playback, Live Volume, Mic
+ * Gain, Line/AV Gain, the test buttons; its setting.ini keys) with the extras of all's mixer below it
+ * (docs/audio.md): the headphone level of each source, the Record switches with the headphone mix,
+ * the built-in receiver's audio, the two HDMI audio switches. One list in sections, scrolled so that
+ * the selected row is always on screen, with the help of the selected row below it (ripples' note
+ * for its test buttons).
+ *
+ * Sliders apply while they move (click to grab, dial, click to release), switches on click. Applying
+ * runs in the mixer's worker; setting.ini is written when a switch is clicked, a slider is released
+ * (ripples' DVR Playback then), the page is left, or SAVE_DELAY_MS after the last dial step of a
+ * slider that is still grabbed - only what changed. The two HDMI switches are [hdmi] audio_out /
+ * audio_in (core/hdmi_audio.c). ripples' Audio Source is the preset of the Record switches and of
+ * the receiver's audio, ripples' Live Volume moves the A/V In level by ripples' curve
+ * (core/audio_mixer.h). The test buttons run ripples' own codec code with the mixer held.
+ */
+
+#define SAVE_DELAY_MS 1000
+
+// ripples' test buttons
 #define DVR_AUDIO_VOLUME_MAX 8
-#define LIVE_AUDIO_VOLUME_MAX 10
-#define RECORD_GAIN_MAX 7
 #define AUDIO_TEST_SAMPLE "/mnt/app/app/audio/dvr_playback_volume_test.wav"
 #define AUDIO_TEST_SAMPLE_SDCARD "/mnt/extsd/dvr_playback_volume_test.wav"
 #define AUDIO_TEST_CAPTURE "/tmp/hdzero_audio_test.wav"
@@ -31,35 +51,154 @@
 #define AUDIO_TEST_COUNT 4
 #define AUDIO_TEST_SECONDS 5            // live stream / record length
 #define AUDIO_TEST_DVR_SAMPLE_MS 10000  // bundled test WAV length
+// the test buttons fill the two button columns, the spacer and the value column
+#define AUDIO_TEST_AREA_W (2 * UI_AUDIO_COL_BUTTON + UI_AUDIO_COL_SPACER + UI_AUDIO_COL_VALUE)
+#define AUDIO_TEST_BUTTON_W ((AUDIO_TEST_AREA_W - (AUDIO_TEST_COUNT - 1) * UI_AUDIO_TEST_BUTTON_GAP) / AUDIO_TEST_COUNT)
 // full button width: the solid-grey button has no border, so the progress
 // fill spans edge to edge (clipped to the rounded corners by the button).
-#define AUDIO_TEST_FILL_MAX_W (UI_AUDIO_TEST_BUTTON_WIDTH)
+#define AUDIO_TEST_FILL_MAX_W (AUDIO_TEST_BUTTON_W)
 
-static btn_group_t btn_group_record_audio;
-static btn_group_t btn_group_audio_source;
-static slider_group_t slider_group_dvr_audio_volume;
-static slider_group_t slider_group_live_audio_volume;
-static slider_group_t slider_group_mic_gain;
-static slider_group_t slider_group_linein_gain;
+typedef enum {
+    ROW_HEADING,      // section heading, not selectable
+    ROW_SLIDER,       // a mixer level or gain
+    ROW_SWITCH,       // a mixer on/off field
+    ROW_LIVE_VOLUME,  // ripples' Live Volume (the mixer, with the A/V In level by ripples' curve)
+    ROW_DVR_VOLUME,   // ripples' DVR Playback ([record] dvr_audio_volume_v2, ripples' playback code)
+    ROW_RECORD_AUDIO, // ripples' Record Audio ([record] audio)
+    ROW_SOURCE,       // ripples' Audio Source: the preset of the Record switches
+    ROW_TEST,         // ripples' test buttons
+    ROW_HDMI_OUT,
+    ROW_HDMI_IN,
+    ROW_BACK,
+} row_type_t;
+
+typedef struct {
+    row_type_t type;
+    audio_mixer_field_t field; // sliders and mixer switches
+    const char *name;
+    const char *hint;
+    const char *btn0; // switches: left button (field value 1), right button (0)
+    const char *btn1;
+} row_t;
+
+#define HEADING(n)           {.type = ROW_HEADING, .field = AUDIO_MIXER_FIELD_COUNT, .name = (n)}
+#define SLIDER(f, n, h)      {.type = ROW_SLIDER, .field = (f), .name = (n), .hint = (h)}
+#define YES_NO(f, n, h)      {.type = ROW_SWITCH, .field = (f), .name = (n), .hint = (h), .btn0 = "Yes", .btn1 = "No"}
+#define ON_OFF(t, f, n, h)   {.type = (t), .field = (f), .name = (n), .hint = (h), .btn0 = "On", .btn1 = "Off"}
+#define RECORD_SOURCE(f, n)  YES_NO(f, n, NULL) // the hint depends on the state, see row_hint()
+
+static const row_t rows[] = {
+    // ---- ripples' page, as it was
+    {.type = ROW_RECORD_AUDIO, .field = AUDIO_MIXER_FIELD_COUNT, .name = "Record Audio", .btn0 = "Yes", .btn1 = "No"},
+    {.type = ROW_SOURCE, .field = AUDIO_MIXER_SOURCE, .name = "Audio Source"}, // hint: row_hint()
+    HEADING("Volume Control"),
+    {.type = ROW_DVR_VOLUME, .field = AUDIO_MIXER_FIELD_COUNT, .name = "DVR Playback", .hint = "Headphone volume while a DVR file plays"},
+    {.type = ROW_LIVE_VOLUME, .field = AUDIO_MIXER_LIVE_VOLUME, .name = "Live Volume", .hint = "Headphone volume. Does not affect recording"},
+    SLIDER(AUDIO_MIXER_MIC_GAIN, "Mic Gain", "Mic gain for headphones and recording"),
+    SLIDER(AUDIO_MIXER_LINEIN_GAIN, "Line/AV Gain", "Level of the recording, the stream and HDMI out"),
+    {.type = ROW_TEST, .field = AUDIO_MIXER_FIELD_COUNT, .name = "Run Test"}, // hint: ripples' note
+
+    // ---- the extras of all's mixer
+    HEADING("Headphones"),
+    SLIDER(AUDIO_MIXER_MIC, "Mic", "Goggle mic, heard in your headphones"),
+    SLIDER(AUDIO_MIXER_LINE_IN, "Line In", "Line In jack (ext. mic), heard in headphones"),
+#if defined(HDZGOGGLE2) || defined(HDZBOXPRO)
+    SLIDER(AUDIO_MIXER_AV, "A/V In", "AV jack, module or receiver (needs Built-in RX Audio On)"),
+#else
+    SLIDER(AUDIO_MIXER_AV, "A/V In", "AV jack or analog module, heard in headphones"),
+#endif
+    // HDMI-in audio played into the DAC (audio_mixer_set_live_dac()); greyed while HDMI In Audio
+    // is not in effect (selectable: its hint says why). All three targets (core/hdmi_audio.h).
+    SLIDER(AUDIO_MIXER_HDMI, "HDMI In", "HDMI in audio, heard in headphones"),
+
+    // the ADC: the DVR, the WiFi stream audio and HDMI out audio all take it
+    HEADING("Recording (DVR, WiFi Stream, HDMI Out)"),
+    YES_NO(AUDIO_MIXER_REC_MIX, "Record Headphone Mix", "Yes: record exactly what you hear above"),
+    RECORD_SOURCE(AUDIO_MIXER_REC_MIC, "Record Mic"),
+    RECORD_SOURCE(AUDIO_MIXER_REC_LINE_IN, "Record Line In"),
+    RECORD_SOURCE(AUDIO_MIXER_REC_AV, "Record A/V In"),
+
+#if defined(HDZGOGGLE2) || defined(HDZBOXPRO)
+    // audio output of the built-in analog receiver, one of the sources of A/V In
+    HEADING("Inputs"),
+    ON_OFF(ROW_SWITCH, AUDIO_MIXER_RX_AUDIO, "Built-in RX Audio", "Audio of the built-in analog receiver on A/V In"),
+#endif
+
+    // both take effect at the next start only (core/hdmi_audio.h)
+    HEADING("HDMI Audio (experimental)"),
+    ON_OFF(ROW_HDMI_OUT, AUDIO_MIXER_FIELD_COUNT, "HDMI Out Audio", "Send the recorded audio to HDMI out. Restart to apply"),
+    ON_OFF(ROW_HDMI_IN, AUDIO_MIXER_FIELD_COUNT, "HDMI In Audio", "Hear HDMI in audio. Restart to apply"),
+
+    {.type = ROW_BACK, .field = AUDIO_MIXER_FIELD_COUNT, .name = "Back"},
+};
+
+#define ROW_COUNT ((int)ARRAY_SIZE(rows))
+
+// hints of the Record source switches
+#define HINT_IN_MIX     "Recorded via the mix, at its headphone level"
+#define HINT_DIRECT_YES "Recorded even if its headphone level is Off"
+#define HINT_DIRECT_NO  "Not recorded. Yes: record it directly"
+// hint of the Audio Source: its source recorded as above, or the Record switches below differ from it
+#define HINT_SOURCE_CHANGED "Changed in the Recording section below"
+// hints of the HDMI In level while HDMI In Audio is not in effect
+#define HINT_HDMI_OFF     "Off: switch on HDMI In Audio at the bottom"
+#define HINT_HDMI_RESTART "Restart the goggle to use HDMI In Audio"
+// HDMI Out Audio switched on, but kept off at this start (core/hdmi_audio.h: the reason follows)
+#define HINT_HDMI_FAULT "Off at this start"
+// value column of the HDMI rows: the switch differs from what is in effect, or it failed
+#define MARK_RESTART "Restart"
+#define MARK_ERROR   "Error"
+// ripples' note of the test buttons
+#if defined(HDZBOXPRO) || defined(HDZGOGGLE2)
+// "Active", not "wired": a received analog signal (e.g. a transmitting drone) feeds the tests too,
+// not just the AV jack.
+#define HINT_TEST "1. Mic: record 5s, auto playback.\n2. Line/AV: record 5s, auto playback.\n3. Test fill: pulsing = loading, red = recording, green = playback.\n4. Live & Line/AV need an active analog audio source."
+#else
+// The faint clicking is menu-mode electrical interference coupling into the codec converters
+// (confirmed by waveform analysis: ~130 analog impulses/s in menu captures, zero in video-mode
+// recordings on the same unit). Not reachable from software; flights and DVR playback are clean.
+#define HINT_TEST "1. Mic: record 5s, auto playback.\n2. Line/AV: record 5s, auto playback.\n3. Test fill: pulsing = loading, red = recording, green = playback.\n4. Clicking or static during tests is normal in the menu, flight recordings are unaffected."
+#endif
+
+/*
+ * Own column layout (conf/ui.h): indent | label | button | button | spacer | value. Sliders span
+ * both button columns and the spacer; ripples' Audio Source (three buttons) and test buttons span
+ * them and the value column; the value column of a Record source switch shows "Mix" while that
+ * source is recorded through the headphone mix. Widths checked for every language at the target's
+ * fonts by utilities/audio_mixer/check_strings.py.
+ */
+static lv_coord_t col_dsc[] = {UI_AUDIO_COL_INDENT, UI_AUDIO_COL_LABEL, UI_AUDIO_COL_BUTTON, UI_AUDIO_COL_BUTTON,
+                               UI_AUDIO_COL_SPACER, UI_AUDIO_COL_VALUE, LV_GRID_TEMPLATE_LAST};
+static lv_coord_t row_dsc[ARRAY_SIZE(rows) + 1];
+static lv_coord_t btn_col_dsc[] = {UI_AUDIO_ARROW_W, UI_AUDIO_COL_BUTTON - UI_AUDIO_ARROW_W, LV_GRID_TEMPLATE_LAST};
+// ripples' Audio Source row: its label and three buttons, each as wide as its text, across the label
+// and button columns, the spacer and the value column (some translations of "Line In" are as wide as
+// two button columns)
+#define SOURCE_ROW_W (UI_AUDIO_COL_LABEL + AUDIO_TEST_AREA_W)
+#define SOURCE_LABEL_GAP 12
+static lv_coord_t source_col_dsc[3][3];
+_Static_assert(UI_AUDIO_COL_INDENT + UI_AUDIO_COL_LABEL + 2 * UI_AUDIO_COL_BUTTON + UI_AUDIO_COL_SPACER + UI_AUDIO_COL_VALUE <= UI_AUDIO_GRID_MAX_W,
+               "the Audio page's columns must fit the page");
+
+static slider_group_t sliders[ARRAY_SIZE(rows)];
+static btn_group_t switches[ARRAY_SIZE(rows)];
+static lv_obj_t *marks[ARRAY_SIZE(rows)];    // "Mix" of the Record source switches, "Restart" / "Error"
+static lv_obj_t *headings[ARRAY_SIZE(rows)]; // heading label of each heading row
+static int sel_row[ARRAY_SIZE(rows)];        // selectable index (panel) -> row
+static int sel_count;
+static lv_obj_t *list; // the scrolling grid
+static lv_obj_t *hint;
+static int focused = -1; // selectable index of the grabbed slider
+static bool dvr_volume_changed; // ripples' DVR Playback moved since it was grabbed
+static lv_timer_t *save_timer;
+
+_Static_assert(ARRAY_SIZE(rows) - 5 <= MAX_PANELS, "one select panel per selectable row (at least 5 headings)");
+
+// ---- ripples' test buttons ----
 static lv_obj_t *test_container;
 static lv_obj_t *test_btn[AUDIO_TEST_COUNT];
 static lv_obj_t *test_label[AUDIO_TEST_COUNT];
 static lv_obj_t *test_fill[AUDIO_TEST_COUNT];
-
-enum {
-    ROW_RECORD_AUDIO = 0,
-    ROW_AUDIO_SOURCE,
-    ROW_VOLUME_HEADER,
-    ROW_DVR_AUDIO_VOLUME,
-    ROW_LIVE_AUDIO_VOLUME,
-    ROW_MIC_GAIN,
-    ROW_LINEIN_GAIN,
-    ROW_RUN_TEST, // last item of the Volume Control section
-    ROW_BACK,
-    ROW_NOTE,
-
-    ROW_COUNT
-};
 
 typedef enum {
     AUDIO_TEST_DVR = 0,
@@ -74,8 +213,6 @@ typedef enum {
     AUDIO_TEST_PHASE_PLAYING,
 } audio_test_phase_t;
 
-static int selected_slider_row = -1;
-static bool selected_slider_changed;
 static bool selected_test_active;
 static volatile bool audio_test_running;
 static volatile audio_test_phase_t audio_test_phase;
@@ -84,26 +221,251 @@ static volatile audio_test_mode_t active_test_mode = AUDIO_TEST_DVR;
 static volatile audio_test_mode_t selected_test_mode = AUDIO_TEST_DVR;
 static uint32_t audio_test_update_ms;
 
-static lv_coord_t col_dsc[] = {UI_AUDIO_COLS};
-static lv_coord_t row_dsc[] = {UI_AUDIO_ROWS};
+static void save_timer_cb(lv_timer_t *timer) {
+    lv_timer_pause(timer);
+    audio_mixer_save();
+}
 
-static void update_visibility() {
-    btn_group_enable(&btn_group_audio_source, btn_group_record_audio.current == 0);
+static bool is_record_source(const row_t *row) {
+    return row->type == ROW_SWITCH && audio_mixer_level_of(row->field) < AUDIO_MIXER_FIELD_COUNT;
+}
 
-    if (btn_group_record_audio.current == 0) {
-        lv_obj_add_flag(pp_audio.p_arr.panel[ROW_AUDIO_SOURCE], FLAG_SELECTABLE);
-    } else {
-        lv_obj_clear_flag(pp_audio.p_arr.panel[ROW_AUDIO_SOURCE], FLAG_SELECTABLE);
+// value of a switch row: 1 = left button
+static int switch_value(const row_t *row) {
+    switch (row->type) {
+    case ROW_HDMI_OUT:
+        return hdmi_audio_out_enabled();
+    case ROW_HDMI_IN:
+        return hdmi_audio_in_enabled();
+    case ROW_RECORD_AUDIO:
+        return g_setting.record.audio;
+    default:
+        return audio_mixer_get(row->field) != 0;
     }
+}
 
-    lv_obj_clear_flag(pp_audio.p_arr.panel[ROW_VOLUME_HEADER], FLAG_SELECTABLE);
-    lv_obj_clear_flag(pp_audio.p_arr.panel[ROW_NOTE], FLAG_SELECTABLE);
+static int slider_value(const row_t *row) {
+    return row->type == ROW_DVR_VOLUME ? g_setting.record.dvr_audio_volume : audio_mixer_get(row->field);
+}
+
+static int slider_max(const row_t *row) {
+    return row->type == ROW_DVR_VOLUME ? DVR_AUDIO_VOLUME_MAX : audio_mixer_max(row->field);
+}
+
+static void update_slider(int r) {
+    char buf[32];
+    const int value = slider_value(&rows[r]);
+
+    lv_slider_set_value(sliders[r].slider, value, LV_ANIM_OFF);
+    if (rows[r].type == ROW_DVR_VOLUME)
+        snprintf(buf, sizeof(buf), "%d", value);
+    else
+        audio_mixer_value_str(rows[r].field, value, buf, sizeof(buf));
+    lv_label_set_text(sliders[r].label, buf);
+}
+
+// The HDMI In level works only while HDMI In Audio is in effect (switched on before this start).
+static bool hdmi_level_usable(const row_t *row) {
+    return !(row->type == ROW_SLIDER && row->field == AUDIO_MIXER_HDMI) || hdmi_audio_in_active();
+}
+
+// A Record source that is recorded through the mix: its own Yes/No does not matter then.
+static bool in_mix(const row_t *row) {
+    return is_record_source(row) && audio_mixer_recorded_via_mix(row->field);
+}
+
+// HDMI Out Audio was on at this start but stayed off (the reason, translated), NULL otherwise.
+static const char *hdmi_out_fault(void) {
+    return hdmi_audio_out_enabled() ? hdmi_audio_out_fault() : NULL;
+}
+
+// The switch differs from what is in effect: it applies at the next start.
+static bool hdmi_restart_pending(const row_t *row) {
+    if (row->type == ROW_HDMI_OUT)
+        return hdmi_audio_out_enabled() != hdmi_audio_out_active() && !hdmi_out_fault();
+    if (row->type == ROW_HDMI_IN)
+        return hdmi_audio_in_enabled() != hdmi_audio_in_active();
+    return false;
+}
+
+static void row_hint(const row_t *row, char *buf, size_t size) {
+    const char *text = row->hint;
+    if (is_record_source(row)) {
+        if (in_mix(row))
+            text = HINT_IN_MIX;
+        else
+            text = audio_mixer_get(row->field) ? HINT_DIRECT_YES : HINT_DIRECT_NO;
+    } else if (row->type == ROW_SOURCE) {
+        text = audio_mixer_is_preset() ? HINT_DIRECT_YES : HINT_SOURCE_CHANGED;
+    } else if (row->type == ROW_TEST) {
+        text = HINT_TEST;
+    } else if (!hdmi_level_usable(row)) {
+        text = hdmi_audio_in_enabled() ? HINT_HDMI_RESTART : HINT_HDMI_OFF;
+    } else if (row->type == ROW_HDMI_OUT && hdmi_out_fault()) {
+        snprintf(buf, size, "%s: %s", _lang(HINT_HDMI_FAULT), _lang(hdmi_out_fault()));
+        return;
+    }
+    snprintf(buf, size, "%s", text ? _lang(text) : "");
+}
+
+static void update_hint(void) {
+    char buf[512] = "";
+    const int sel = pp_audio.p_arr.cur;
+    const bool note = sel >= 0 && sel < sel_count && rows[sel_row[sel]].type == ROW_TEST;
+    if (sel >= 0 && sel < sel_count)
+        row_hint(&rows[sel_row[sel]], buf, sizeof(buf));
+    // (ripples' note of the test buttons in its own font, as on ripples' page)
+    lv_obj_set_style_text_font(hint, note ? UI_PAGE_LABEL_FONT : UI_AUDIO_HINT_FONT, 0);
+    lv_label_set_text(hint, buf);
+}
+
+static void update_rows(void) {
+    char buf[64];
+    for (int sel = 0; sel < sel_count; sel++) {
+        const int r = sel_row[sel];
+        const row_t *row = &rows[r];
+        switch (row->type) {
+        case ROW_SLIDER:
+        case ROW_LIVE_VOLUME:
+        case ROW_DVR_VOLUME:
+            update_slider(r);
+            // (greyed, but selectable: its hint says how to switch it on)
+            slider_enable(&sliders[r], hdmi_level_usable(row));
+            break;
+        case ROW_RECORD_AUDIO:
+            btn_group_set_sel(&switches[r], switch_value(row) ? 0 : 1);
+            break;
+        case ROW_SOURCE:
+            // ripples: greyed and skipped while Record Audio is No
+            btn_group_set_sel(&switches[r], audio_mixer_get(AUDIO_MIXER_SOURCE));
+            btn_group_enable(&switches[r], g_setting.record.audio);
+            if (g_setting.record.audio)
+                lv_obj_add_flag(pp_audio.p_arr.panel[sel], FLAG_SELECTABLE);
+            else
+                lv_obj_clear_flag(pp_audio.p_arr.panel[sel], FLAG_SELECTABLE);
+            break;
+        case ROW_SWITCH:
+            // a source recorded through the mix: recorded, so Yes, greyed (the row never shows
+            // "No" next to "Mix"); its own setting comes back when it leaves the mix
+            btn_group_set_sel(&switches[r], (in_mix(row) || switch_value(row)) ? 0 : 1);
+            btn_group_enable(&switches[r], !in_mix(row));
+            if (marks[r])
+                lv_label_set_text(marks[r], in_mix(row) ? _lang("Mix") : "");
+            break;
+        case ROW_HDMI_OUT:
+        case ROW_HDMI_IN:
+            btn_group_set_sel(&switches[r], switch_value(row) ? 0 : 1);
+            buf[0] = 0;
+            if (row->type == ROW_HDMI_OUT && hdmi_out_fault())
+                snprintf(buf, sizeof(buf), "#FFA000 %s#", _lang(MARK_ERROR));
+            else if (hdmi_restart_pending(row))
+                snprintf(buf, sizeof(buf), "#FFA000 %s#", _lang(MARK_RESTART));
+            lv_label_set_text(marks[r], buf);
+            break;
+        default:
+            break;
+        }
+    }
+    update_hint();
+}
+
+// Keep the selected row on screen, with its section heading when it is the first row of a section.
+// (set_select_item() already scrolls the selected panel into view; this adds the heading.)
+static void scroll_to_selection(void) {
+    const int sel = pp_audio.p_arr.cur;
+    if (sel < 0 || sel >= sel_count)
+        return;
+    const int r = sel_row[sel];
+    if (r > 0 && rows[r - 1].type == ROW_HEADING)
+        lv_obj_scroll_to_view(headings[r - 1], LV_ANIM_OFF);
+    lv_obj_scroll_to_view(pp_audio.p_arr.panel[sel], LV_ANIM_OFF);
+}
+
+static lv_obj_t *create_heading(lv_obj_t *parent, const char *text, int r) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_label_set_text(label, _lang(text));
+    lv_obj_set_style_text_font(label, UI_AUDIO_HEADING_FONT, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_AUDIO_HEADING_COLOR), 0);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    // the whole row (scrolling it into view then scrolls by whole rows), the text at its bottom
+    // with a thin line under it, across the row
+    lv_obj_set_size(label, UI_AUDIO_COL_LABEL + 2 * UI_AUDIO_COL_BUTTON + UI_AUDIO_COL_SPACER + UI_AUDIO_COL_VALUE, UI_AUDIO_ROW_H);
+    lv_obj_set_style_pad_bottom(label, 2, 0);
+    lv_obj_set_style_pad_top(label, UI_AUDIO_ROW_H - 2 - lv_font_get_line_height(UI_AUDIO_HEADING_FONT), 0);
+    lv_obj_set_style_border_side(label, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(label, 1, 0);
+    lv_obj_set_style_border_color(label, lv_color_hex(UI_AUDIO_HEADING_COLOR), 0);
+    lv_obj_set_style_border_opa(label, LV_OPA_50, 0);
+    lv_obj_set_grid_cell(label, LV_GRID_ALIGN_START, 1, 5, LV_GRID_ALIGN_START, r, 1);
+    return label;
+}
+
+static void style_button(btn_with_arr_t *b, lv_coord_t width, const lv_coord_t *cols) {
+    lv_obj_set_width(b->container, width);
+    lv_obj_set_style_grid_column_dsc_array(b->container, cols, 0);
+    lv_obj_set_width(b->btn, width - UI_AUDIO_ARROW_W);
+    lv_obj_set_style_pad_left(b->btn, UI_AUDIO_BTN_PAD, 0);
+    lv_obj_set_style_pad_right(b->btn, 0, 0);
+}
+
+static void create_switch(int r) {
+    const row_t *row = &rows[r];
+    btn_group_t *t = &switches[r];
+    create_btn_group_item(t, list, 2, _lang(row->name), _lang(row->btn0), _lang(row->btn1), "", "", r);
+    lv_obj_set_grid_cell(t->label, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, r, 1);
+    lv_obj_set_width(t->label, UI_AUDIO_COL_LABEL);
+    for (int i = 0; i < 2; i++)
+        style_button(&t->btn_a[i], UI_AUDIO_COL_BUTTON, btn_col_dsc);
+    // value column: "Mix" of a Record source, "Restart" / "Error" (orange) of the HDMI switches
+    if (is_record_source(row) || row->type == ROW_HDMI_OUT || row->type == ROW_HDMI_IN) {
+        marks[r] = lv_label_create(list);
+        lv_label_set_text(marks[r], "");
+        lv_label_set_recolor(marks[r], true);
+        lv_obj_set_style_text_font(marks[r], UI_PAGE_TEXT_FONT, 0);
+        lv_obj_set_style_text_color(marks[r], lv_color_hex(UI_AUDIO_HEADING_COLOR), 0);
+        lv_obj_set_style_pad_top(marks[r], UI_PAGE_TEXT_PAD, 0);
+        lv_obj_set_size(marks[r], UI_AUDIO_COL_VALUE, UI_AUDIO_ROW_H);
+        lv_label_set_long_mode(marks[r], LV_LABEL_LONG_DOT);
+        lv_obj_set_grid_cell(marks[r], LV_GRID_ALIGN_START, 5, 1, LV_GRID_ALIGN_CENTER, r, 1);
+    }
+}
+
+static lv_coord_t text_width(const char *text, const lv_font_t *font) {
+    lv_point_t size;
+    lv_txt_get_size(&size, text, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return size.x;
+}
+
+// ripples' Audio Source: its label and three buttons in a row of their own widths (a button of the
+// width of its text, as the other buttons of the page leave room for theirs), from the label column
+// to the value column. utilities/audio_mixer/check_strings.py checks that the row fits.
+static void create_source(int r) {
+    btn_group_t *t = &switches[r];
+    const char *names[3] = {_lang("Mic"), _lang("Line In"), _lang("A/V In")};
+    create_btn_group_item(t, list, 3, _lang(rows[r].name), names[0], names[1], names[2], "", r);
+    lv_obj_t *box = lv_obj_create(list);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_size(box, SOURCE_ROW_W, UI_AUDIO_ROW_H);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_grid_cell(box, LV_GRID_ALIGN_START, 1, 5, LV_GRID_ALIGN_CENTER, r, 1);
+    lv_obj_set_parent(t->label, box);
+    lv_obj_set_width(t->label, text_width(lv_label_get_text(t->label), UI_PAGE_TEXT_FONT) + SOURCE_LABEL_GAP);
+    for (int i = 0; i < 3; i++) {
+        const lv_coord_t w = UI_AUDIO_ARROW_W + UI_AUDIO_BTN_PAD + text_width(names[i], UI_PAGE_TEXT_FONT) + SOURCE_LABEL_GAP;
+        source_col_dsc[i][0] = UI_AUDIO_ARROW_W;
+        source_col_dsc[i][1] = w - UI_AUDIO_ARROW_W;
+        source_col_dsc[i][2] = LV_GRID_TEMPLATE_LAST;
+        lv_obj_set_parent(t->btn_a[i].container, box);
+        style_button(&t->btn_a[i], w, source_col_dsc[i]);
+    }
 }
 
 static void create_test_button(lv_obj_t *parent, audio_test_mode_t mode, const char *name) {
     test_btn[mode] = lv_btn_create(parent);
-    lv_obj_set_size(test_btn[mode], UI_AUDIO_TEST_BUTTON_WIDTH, UI_AUDIO_TEST_BUTTON_HEIGHT);
-    lv_obj_set_pos(test_btn[mode], mode * (UI_AUDIO_TEST_BUTTON_WIDTH + UI_AUDIO_TEST_BUTTON_GAP), 0);
+    lv_obj_set_size(test_btn[mode], AUDIO_TEST_BUTTON_W, UI_AUDIO_TEST_BUTTON_HEIGHT);
+    lv_obj_set_pos(test_btn[mode], mode * (AUDIO_TEST_BUTTON_W + UI_AUDIO_TEST_BUTTON_GAP), 0);
     // Solid dark-grey base with rounded corners, matching the Scan Now mode
     // buttons. The focus (green) / border state is applied per-frame in
     // page_audio_update_test_indicator. clip_corner keeps the progress fill
@@ -134,8 +496,24 @@ static void create_test_button(lv_obj_t *parent, audio_test_mode_t mode, const c
     lv_obj_center(test_label[mode]);
 }
 
+static void create_tests(int r) {
+    create_label_item(list, _lang(rows[r].name), 1, r, 1);
+    test_container = lv_obj_create(list);
+    lv_obj_set_size(test_container, AUDIO_TEST_AREA_W, UI_AUDIO_TEST_BUTTON_HEIGHT);
+    lv_obj_clear_flag(test_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_style(test_container, &style_context, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(test_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(test_container, 0, 0);
+    lv_obj_set_style_pad_all(test_container, 0, 0);
+    lv_obj_set_grid_cell(test_container, LV_GRID_ALIGN_START, 2, 4, LV_GRID_ALIGN_CENTER, r, 1);
+    create_test_button(test_container, AUDIO_TEST_DVR, _lang("DVR"));
+    create_test_button(test_container, AUDIO_TEST_LIVE, _lang("Live"));
+    create_test_button(test_container, AUDIO_TEST_MIC, _lang("Mic"));
+    create_test_button(test_container, AUDIO_TEST_LINE_AV, _lang("Line/AV"));
+}
+
 static lv_obj_t *page_audio_create(lv_obj_t *parent, panel_arr_t *arr) {
-    char buf[256];
+    char buf[128];
     lv_obj_t *page = lv_menu_page_create(parent, NULL);
     lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(page, UI_PAGE_VIEW_SIZE);
@@ -144,104 +522,113 @@ static lv_obj_t *page_audio_create(lv_obj_t *parent, panel_arr_t *arr) {
     lv_obj_t *section = lv_menu_section_create(page);
     lv_obj_add_style(section, &style_submenu, LV_PART_MAIN);
     lv_obj_set_size(section, UI_PAGE_VIEW_SIZE);
+    lv_obj_set_style_pad_top(section, UI_AUDIO_PAD_TOP, 0);
 
-    snprintf(buf, sizeof(buf), "%s:", _lang("Audio"));
+    snprintf(buf, sizeof(buf), "%s:", _lang(pp_audio.name));
     create_text(NULL, section, false, buf, LV_MENU_ITEM_BUILDER_VARIANT_2);
 
-    lv_obj_t *cont = lv_obj_create(section);
-    lv_obj_set_size(cont, UI_PAGE_VIEW_SIZE);
-    lv_obj_set_pos(cont, 0, 0);
-    lv_obj_set_layout(cont, LV_LAYOUT_GRID);
-    lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_style(cont, &style_context, LV_PART_MAIN);
+    // The rows: taller than the window, scrolled only by the selection (lv_obj_scroll_to_view).
+    list = lv_obj_create(section);
+    lv_obj_set_size(list, lv_pct(100), UI_AUDIO_VIEW_H);
+    lv_obj_set_pos(list, 0, 0);
+    lv_obj_set_layout(list, LV_LAYOUT_GRID);
+    lv_obj_add_style(list, &style_context, LV_PART_MAIN);
+    lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_clear_flag(list, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN);
+    // a scroll bar shows that there is more
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ON);
+    lv_obj_set_style_bg_color(list, lv_color_hex(TEXT_COLOR_DISABLE), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(list, 4, LV_PART_SCROLLBAR);
 
-    lv_obj_set_style_grid_column_dsc_array(cont, col_dsc, 0);
-    lv_obj_set_style_grid_row_dsc_array(cont, row_dsc, 0);
+    // every row the same height, headings too: scrolled by whole rows, the window never shows half a row
+    for (int r = 0; r < ROW_COUNT; r++)
+        row_dsc[r] = UI_AUDIO_ROW_H;
+    _Static_assert(UI_AUDIO_VIEW_H % UI_AUDIO_ROW_H == 0, "the window shows whole rows");
+    row_dsc[ROW_COUNT] = LV_GRID_TEMPLATE_LAST;
+    lv_obj_set_style_grid_column_dsc_array(list, col_dsc, 0);
+    lv_obj_set_style_grid_row_dsc_array(list, row_dsc, 0);
+    // no column gaps (the columns are sized for the longest translation), no row gaps
+    lv_obj_set_style_pad_row(list, 0, 0);
+    lv_obj_set_style_pad_column(list, 0, 0);
 
-    create_select_item(arr, cont);
+    create_select_item(arr, list);
 
-    create_btn_group_item(&btn_group_record_audio, cont, 2, _lang("Record Audio"), _lang("Yes"), _lang("No"), "", "", ROW_RECORD_AUDIO);
-    create_btn_group_item(&btn_group_audio_source, cont, 3, _lang("Audio Source"), _lang("Mic"), _lang("Line In"), _lang("A/V In"), "", ROW_AUDIO_SOURCE);
-    snprintf(buf, sizeof(buf), "%s:", _lang("Volume Control"));
-    create_label_item(cont, buf, 0, ROW_VOLUME_HEADER, 2);
-    create_label_item(cont, _lang("Run Test"), 1, ROW_RUN_TEST, 1);
+    sel_count = 0;
+    for (int r = 0; r < ROW_COUNT; r++) {
+        const row_t *row = &rows[r];
+        if (row->type == ROW_HEADING) {
+            headings[r] = create_heading(list, row->name, r);
+            continue;
+        }
 
-    test_container = lv_obj_create(cont);
-    lv_obj_set_size(test_container,
-                    AUDIO_TEST_COUNT * UI_AUDIO_TEST_BUTTON_WIDTH + (AUDIO_TEST_COUNT - 1) * UI_AUDIO_TEST_BUTTON_GAP,
-                    UI_AUDIO_TEST_BUTTON_HEIGHT);
-    lv_obj_clear_flag(test_container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_style(test_container, &style_context, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(test_container, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(test_container, 0, 0);
-    lv_obj_set_style_pad_all(test_container, 0, 0);
-    lv_obj_set_grid_cell(test_container, LV_GRID_ALIGN_START, 2, 4,
-                         LV_GRID_ALIGN_CENTER, ROW_RUN_TEST, 1);
-    create_test_button(test_container, AUDIO_TEST_DVR, _lang("DVR"));
-    create_test_button(test_container, AUDIO_TEST_LIVE, _lang("Live"));
-    create_test_button(test_container, AUDIO_TEST_MIC, _lang("Mic"));
-    create_test_button(test_container, AUDIO_TEST_LINE_AV, _lang("Line/AV"));
+        // this row's selection panel
+        const int sel = sel_count++;
+        sel_row[sel] = r;
+        lv_obj_set_grid_cell(arr->panel[sel], LV_GRID_ALIGN_STRETCH, 0, 6, LV_GRID_ALIGN_STRETCH, r, 1);
 
-    create_slider_item(&slider_group_dvr_audio_volume, cont, _lang("DVR Playback"), DVR_AUDIO_VOLUME_MAX, g_setting.record.dvr_audio_volume, ROW_DVR_AUDIO_VOLUME);
-    lv_obj_set_grid_cell(slider_group_dvr_audio_volume.name, LV_GRID_ALIGN_START, 1, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_DVR_AUDIO_VOLUME, 1);
-    lv_obj_set_grid_cell(slider_group_dvr_audio_volume.slider, LV_GRID_ALIGN_STRETCH, 2, 3,
-                         LV_GRID_ALIGN_CENTER, ROW_DVR_AUDIO_VOLUME, 1);
-    lv_obj_set_grid_cell(slider_group_dvr_audio_volume.label, LV_GRID_ALIGN_START, 5, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_DVR_AUDIO_VOLUME, 1);
-    create_slider_item(&slider_group_live_audio_volume, cont, _lang("Live Volume"), LIVE_AUDIO_VOLUME_MAX, g_setting.record.live_audio_volume, ROW_LIVE_AUDIO_VOLUME);
-    lv_obj_set_grid_cell(slider_group_live_audio_volume.name, LV_GRID_ALIGN_START, 1, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_LIVE_AUDIO_VOLUME, 1);
-    lv_obj_set_grid_cell(slider_group_live_audio_volume.slider, LV_GRID_ALIGN_STRETCH, 2, 3,
-                         LV_GRID_ALIGN_CENTER, ROW_LIVE_AUDIO_VOLUME, 1);
-    lv_obj_set_grid_cell(slider_group_live_audio_volume.label, LV_GRID_ALIGN_START, 5, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_LIVE_AUDIO_VOLUME, 1);
-    create_slider_item(&slider_group_mic_gain, cont, _lang("Mic Gain"), RECORD_GAIN_MAX, g_setting.record.mic_gain, ROW_MIC_GAIN);
-    lv_obj_set_grid_cell(slider_group_mic_gain.name, LV_GRID_ALIGN_START, 1, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_MIC_GAIN, 1);
-    lv_obj_set_grid_cell(slider_group_mic_gain.slider, LV_GRID_ALIGN_STRETCH, 2, 3,
-                         LV_GRID_ALIGN_CENTER, ROW_MIC_GAIN, 1);
-    lv_obj_set_grid_cell(slider_group_mic_gain.label, LV_GRID_ALIGN_START, 5, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_MIC_GAIN, 1);
-    create_slider_item(&slider_group_linein_gain, cont, _lang("Line/AV Gain"), RECORD_GAIN_MAX, g_setting.record.linein_gain, ROW_LINEIN_GAIN);
-    lv_obj_set_grid_cell(slider_group_linein_gain.name, LV_GRID_ALIGN_START, 1, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_LINEIN_GAIN, 1);
-    lv_obj_set_grid_cell(slider_group_linein_gain.slider, LV_GRID_ALIGN_STRETCH, 2, 3,
-                         LV_GRID_ALIGN_CENTER, ROW_LINEIN_GAIN, 1);
-    lv_obj_set_grid_cell(slider_group_linein_gain.label, LV_GRID_ALIGN_START, 5, 1,
-                         LV_GRID_ALIGN_CENTER, ROW_LINEIN_GAIN, 1);
-    snprintf(buf, sizeof(buf), "< %s", _lang("Back"));
-    create_label_item(cont, buf, 1, ROW_BACK, 1);
-    lv_obj_t *note = lv_label_create(cont);
-#if defined(HDZBOXPRO) || defined(HDZGOGGLE2)
-    // "Active", not "wired": a received analog signal (e.g. a transmitting
-    // drone) feeds the tests too, not just the AV jack.
-    lv_label_set_text(note, _lang("1. Mic: record 5s, auto playback.\n2. Line/AV: record 5s, auto playback.\n3. Test fill: pulsing = loading, red = recording, green = playback.\n4. Live & Line/AV need an active analog audio source."));
-#else
-    // The faint clicking is menu-mode electrical interference coupling into
-    // the codec converters (confirmed by waveform analysis: ~130 analog
-    // impulses/s in menu captures, zero in video-mode recordings on the same
-    // unit). Not reachable from software; flights and DVR playback are clean.
-    lv_label_set_text(note, _lang("1. Mic: record 5s, auto playback.\n2. Line/AV: record 5s, auto playback.\n3. Test fill: pulsing = loading, red = recording, green = playback.\n4. Clicking or static during tests is normal in the menu, flight recordings are unaffected."));
-#endif
-    lv_obj_set_style_text_font(note, UI_PAGE_LABEL_FONT, 0);
-    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_style_text_color(note, lv_color_hex(TEXT_COLOR_DEFAULT), 0);
-    lv_obj_set_style_pad_top(note, 0, 0);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_grid_cell(note, LV_GRID_ALIGN_START, 1, 5, LV_GRID_ALIGN_START, ROW_NOTE, 1);
+        switch (row->type) {
+        case ROW_SLIDER:
+        case ROW_LIVE_VOLUME:
+        case ROW_DVR_VOLUME: {
+            slider_group_t *s = &sliders[r];
+            create_slider_item(s, list, _lang(row->name), slider_max(row), 0, r);
+            lv_obj_set_grid_cell(s->name, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, r, 1);
+            lv_obj_set_width(s->name, UI_AUDIO_COL_LABEL);
+            lv_obj_set_grid_cell(s->slider, LV_GRID_ALIGN_START, 2, 3, LV_GRID_ALIGN_CENTER, r, 1);
+            lv_obj_set_width(s->slider, 2 * UI_AUDIO_COL_BUTTON + UI_AUDIO_COL_SPACER - UI_AUDIO_SLIDER_GAP);
+            lv_obj_set_width(s->label, UI_AUDIO_COL_VALUE);
+            // the knob stays inside its row: nothing of a row scrolled out shows at the window's edge
+            lv_obj_set_style_pad_ver(s->slider, UI_AUDIO_KNOB_PAD, LV_PART_KNOB);
+            break;
+        }
+        case ROW_SWITCH:
+        case ROW_RECORD_AUDIO:
+        case ROW_HDMI_OUT:
+        case ROW_HDMI_IN:
+            create_switch(r);
+            break;
+        case ROW_SOURCE:
+            create_source(r);
+            break;
+        case ROW_TEST:
+            create_tests(r);
+            break;
+        case ROW_BACK:
+            snprintf(buf, sizeof(buf), "< %s", _lang(row->name));
+            create_label_item(list, buf, 1, r, 1);
+            break;
+        default:
+            break;
+        }
+    }
 
-    btn_group_set_sel(&btn_group_record_audio, g_setting.record.audio ? 0 : 1);
-    btn_group_set_sel(&btn_group_audio_source, g_setting.record.audio_source);
-    update_slider_item_with_value(&slider_group_dvr_audio_volume, g_setting.record.dvr_audio_volume);
-    update_slider_item_with_value(&slider_group_live_audio_volume, g_setting.record.live_audio_volume);
-    update_slider_item_with_value(&slider_group_mic_gain, g_setting.record.mic_gain);
-    update_slider_item_with_value(&slider_group_linein_gain, g_setting.record.linein_gain);
+    // the help for the selected row, fixed below the list (up to UI_AUDIO_HINT_LINES lines: ripples'
+    // note of the test buttons)
+    hint = lv_label_create(section);
+    lv_label_set_text(hint, "");
+    lv_obj_set_style_text_font(hint, UI_AUDIO_HINT_FONT, 0);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_text_color(hint, lv_color_hex(TEXT_COLOR_DEFAULT), 0);
+    lv_obj_set_style_pad_top(hint, UI_AUDIO_HINT_PAD, 0);
+    lv_obj_set_style_pad_left(hint, UI_AUDIO_COL_INDENT, 0);
+    lv_obj_set_width(hint, UI_AUDIO_COL_INDENT + UI_AUDIO_COL_LABEL + 2 * UI_AUDIO_COL_BUTTON + UI_AUDIO_COL_SPACER + UI_AUDIO_COL_VALUE);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
 
-    update_visibility();
+    pp_audio.p_arr.max = sel_count;
+    update_rows();
+    // no hint while the page is only previewed from the main menu
+    lv_label_set_text(hint, "");
+
+    // runs in lv_timer_handler(), under lvgl_mutex like the input handlers
+    save_timer = lv_timer_create(save_timer_cb, SAVE_DELAY_MS, NULL);
+    lv_timer_pause(save_timer);
 
     return page;
 }
+
+// ---- ripples' test buttons (src/ui/page_audio.c of ripples 4fbb865; the mixer held meanwhile) ----
 
 static void page_audio_update_test_indicator(uint32_t delta_ms) {
     static audio_test_phase_t prev_phase = AUDIO_TEST_PHASE_IDLE;
@@ -315,121 +702,6 @@ static void page_audio_update_test_indicator(uint32_t delta_ms) {
     }
 }
 
-static slider_group_t *page_audio_selected_slider() {
-    if (selected_slider_row == ROW_DVR_AUDIO_VOLUME)
-        return &slider_group_dvr_audio_volume;
-    if (selected_slider_row == ROW_LIVE_AUDIO_VOLUME)
-        return &slider_group_live_audio_volume;
-    if (selected_slider_row == ROW_MIC_GAIN)
-        return &slider_group_mic_gain;
-    if (selected_slider_row == ROW_LINEIN_GAIN)
-        return &slider_group_linein_gain;
-    return NULL;
-}
-
-static int page_audio_selected_slider_max() {
-    if (selected_slider_row == ROW_DVR_AUDIO_VOLUME)
-        return DVR_AUDIO_VOLUME_MAX;
-    if (selected_slider_row == ROW_LIVE_AUDIO_VOLUME)
-        return LIVE_AUDIO_VOLUME_MAX;
-    return RECORD_GAIN_MAX;
-}
-
-static int *page_audio_selected_setting() {
-    if (selected_slider_row == ROW_DVR_AUDIO_VOLUME)
-        return &g_setting.record.dvr_audio_volume;
-    if (selected_slider_row == ROW_LIVE_AUDIO_VOLUME)
-        return &g_setting.record.live_audio_volume;
-    if (selected_slider_row == ROW_MIC_GAIN)
-        return &g_setting.record.mic_gain;
-    if (selected_slider_row == ROW_LINEIN_GAIN)
-        return &g_setting.record.linein_gain;
-    return NULL;
-}
-
-static void page_audio_update_slider(int value) {
-    slider_group_t *slider_group = page_audio_selected_slider();
-    int *setting_value = page_audio_selected_setting();
-    int max_value = page_audio_selected_slider_max();
-
-    if (slider_group == NULL || setting_value == NULL)
-        return;
-
-    if (value < AUDIO_VOLUME_MIN)
-        value = AUDIO_VOLUME_MIN;
-    else if (value > max_value)
-        value = max_value;
-
-    if (*setting_value == value)
-        return;
-
-    *setting_value = value;
-    update_slider_item_with_value(slider_group, *setting_value);
-    selected_slider_changed = true;
-}
-
-static void page_audio_exit_slider() {
-    slider_group_t *slider_group = page_audio_selected_slider();
-
-    if (slider_group != NULL)
-        lv_obj_add_style(slider_group->slider, &style_silder_main, LV_PART_MAIN);
-
-    app_state_push(APP_STATE_SUBMENU);
-
-    if (selected_slider_changed) {
-        if (selected_slider_row == ROW_DVR_AUDIO_VOLUME) {
-            ini_putl("record", "dvr_audio_volume_v2", g_setting.record.dvr_audio_volume, SETTING_INI);
-        } else if (selected_slider_row == ROW_LIVE_AUDIO_VOLUME) {
-            ini_putl("record", "live_audio_volume", g_setting.record.live_audio_volume, SETTING_INI);
-            dvr_set_live_audio_volume(g_setting.record.live_audio_volume);
-        } else if (selected_slider_row == ROW_MIC_GAIN) {
-            ini_putl("record", "mic_gain", g_setting.record.mic_gain, SETTING_INI);
-            if (g_setting.record.audio_source == SETTING_RECORD_AUDIO_SOURCE_MIC)
-                dvr_set_mic_gain(g_setting.record.mic_gain);
-        } else if (selected_slider_row == ROW_LINEIN_GAIN) {
-            ini_putl("record", "linein_gain", g_setting.record.linein_gain, SETTING_INI);
-            if (g_setting.record.audio_source != SETTING_RECORD_AUDIO_SOURCE_MIC)
-                dvr_set_linein_gain(g_setting.record.linein_gain);
-        }
-        selected_slider_changed = false;
-    }
-
-    selected_slider_row = -1;
-}
-
-static void page_audio_exit() {
-    if (selected_slider_row != -1) {
-        page_audio_exit_slider();
-    }
-    selected_test_active = false;
-}
-
-static void page_audio_on_roller(uint8_t key) {
-    int32_t value;
-    slider_group_t *slider_group = page_audio_selected_slider();
-
-    if (selected_test_active) {
-        if (key == DIAL_KEY_UP) {
-            selected_test_mode = selected_test_mode == 0 ? AUDIO_TEST_COUNT - 1 : selected_test_mode - 1;
-        } else if (key == DIAL_KEY_DOWN) {
-            selected_test_mode = (selected_test_mode + 1) % AUDIO_TEST_COUNT;
-        }
-        return;
-    }
-
-    if (slider_group == NULL)
-        return;
-
-    value = lv_slider_get_value(slider_group->slider);
-    if (key == DIAL_KEY_UP && value > AUDIO_VOLUME_MIN) {
-        value--;
-    } else if (key == DIAL_KEY_DOWN && value < page_audio_selected_slider_max()) {
-        value++;
-    }
-
-    page_audio_update_slider(value);
-}
-
 static void page_audio_play_wav(const char *path) {
 #if defined(HDZGOGGLE)
     // MPI AO engine, not aplay: the ALSA hw path renders static-laden audio
@@ -465,7 +737,7 @@ static void page_audio_enable_dac_playback(void) {
     system_exec(buf);
     // Cut the remaining analog inputs to the output mixer too: a MIC boost
     // stage left enabled by the board's boot state feeds open-mic noise to
-    // the lineout whenever it is on (nothing in the app ever switches these).
+    // the lineout whenever it is on.
     snprintf(buf, sizeof(buf), "%s out_mic1_off", AUDIO_SEL_SH);
     system_exec(buf);
     snprintf(buf, sizeof(buf), "%s out_mic2_off", AUDIO_SEL_SH);
@@ -490,24 +762,6 @@ static void page_audio_enable_dac_playback(void) {
 #endif
 }
 
-static void page_audio_disable_dac_playback(bool live_audio_was_enabled) {
-    char buf[128];
-
-#if !defined(HDZGOGGLE)
-    // G1 never enabled the Output Mixer DAC path (see
-    // page_audio_enable_dac_playback), so there is nothing to switch off.
-    snprintf(buf, sizeof(buf), "%s out_dac_off", AUDIO_SEL_SH);
-    system_exec(buf);
-#endif
-
-    if (live_audio_was_enabled) {
-        dvr_restore_live_audio();
-    } else {
-        snprintf(buf, sizeof(buf), "%s out_off", AUDIO_SEL_SH);
-        system_exec(buf);
-    }
-}
-
 static const char *page_audio_test_sample_path(void) {
     if (fs_file_exists(AUDIO_TEST_SAMPLE_SDCARD))
         return AUDIO_TEST_SAMPLE_SDCARD;
@@ -519,7 +773,7 @@ static const char *page_audio_capture_path(void) {
 }
 
 static void page_audio_capture_wav(setting_record_audio_source_t source) {
-    dvr_select_audio_source(source);
+    dvr_test_select_audio_source(source);
     audio_test_phase_duration_ms = AUDIO_TEST_SECONDS * 1000;
     audio_test_phase = AUDIO_TEST_PHASE_RECORDING;
 #if defined(HDZGOGGLE)
@@ -540,8 +794,6 @@ static void page_audio_capture_wav(setting_record_audio_source_t source) {
 
 static void *page_audio_test_thread(void *arg) {
     audio_test_mode_t mode = (audio_test_mode_t)(intptr_t)arg;
-    setting_record_audio_source_t previous_source = g_setting.record.audio_source;
-    bool live_audio_was_enabled = dvr_live_audio_is_enabled();
 
     // No RX handling on BoxPro/G2: the internal analog module's audio only
     // reaches the codec in analog video mode (a wired AV-in source plays
@@ -549,6 +801,9 @@ static void *page_audio_test_thread(void *arg) {
     // powering it up here just made heat. From the menu the Live/Line-AV
     // tests cover the wired Line In / A/V In path.
 
+    // ripples' own codec code from here on; the mixer neither applies nor watches meanwhile, and
+    // puts the page's state back afterwards (ripples restored its source and line out itself)
+    audio_mixer_hold(true);
     active_test_mode = mode;
     switch (mode) {
     case AUDIO_TEST_MIC:
@@ -558,21 +813,14 @@ static void *page_audio_test_thread(void *arg) {
         audio_test_phase_duration_ms = AUDIO_TEST_SECONDS * 1000;
         audio_test_phase = AUDIO_TEST_PHASE_PLAYING;
         page_audio_play_wav(page_audio_capture_path());
-        page_audio_disable_dac_playback(live_audio_was_enabled);
-        dvr_select_audio_source(previous_source);
         break;
     case AUDIO_TEST_LIVE: {
-        dvr_select_audio_source(SETTING_RECORD_AUDIO_SOURCE_LINE_IN);
-        dvr_enable_line_out(true);
+        dvr_test_select_audio_source(SETTING_RECORD_AUDIO_SOURCE_LINE_IN);
+        dvr_test_line_out(true);
         dvr_set_live_audio_volume(g_setting.record.live_audio_volume);
         audio_test_phase_duration_ms = AUDIO_TEST_SECONDS * 1000;
         audio_test_phase = AUDIO_TEST_PHASE_PLAYING;
         sleep(AUDIO_TEST_SECONDS);
-        if (!live_audio_was_enabled)
-            dvr_enable_line_out(false);
-        else
-            dvr_set_live_audio_volume(g_setting.record.live_audio_volume);
-        dvr_select_audio_source(previous_source);
         break;
     }
     case AUDIO_TEST_LINE_AV:
@@ -582,8 +830,6 @@ static void *page_audio_test_thread(void *arg) {
         audio_test_phase_duration_ms = AUDIO_TEST_SECONDS * 1000;
         audio_test_phase = AUDIO_TEST_PHASE_PLAYING;
         page_audio_play_wav(page_audio_capture_path());
-        page_audio_disable_dac_playback(live_audio_was_enabled);
-        dvr_select_audio_source(previous_source);
         break;
     case AUDIO_TEST_DVR:
         dvr_mute_live_audio();
@@ -591,9 +837,10 @@ static void *page_audio_test_thread(void *arg) {
         audio_test_phase_duration_ms = AUDIO_TEST_DVR_SAMPLE_MS;
         audio_test_phase = AUDIO_TEST_PHASE_PLAYING;
         page_audio_play_wav(page_audio_test_sample_path());
-        page_audio_disable_dac_playback(live_audio_was_enabled);
         break;
     }
+    // the page's routing again: record sources, line out, the output mixers (DAC out of them)
+    audio_mixer_hold(false);
 
     audio_test_phase = AUDIO_TEST_PHASE_IDLE;
     audio_test_running = false;
@@ -619,13 +866,101 @@ static void page_audio_run_test(void) {
     }
 }
 
-static void page_audio_on_click(uint8_t key, int sel) {
-    (void)key;
+// ---- input ----
 
-    if (selected_slider_row != -1) {
-        page_audio_exit_slider();
+static void release_slider(bool back_to_submenu) {
+    if (focused < 0)
+        return;
+
+    const row_t *row = &rows[sel_row[focused]];
+    lv_obj_remove_style(sliders[sel_row[focused]].slider, &style_silder_select, LV_PART_MAIN);
+    if (row->type == ROW_DVR_VOLUME && dvr_volume_changed) {
+        // ripples: stored on release, used by the next playback
+        ini_putl("record", "dvr_audio_volume_v2", g_setting.record.dvr_audio_volume, SETTING_INI);
+        dvr_volume_changed = false;
+    }
+    focused = -1;
+    lv_timer_pause(save_timer);
+    audio_mixer_save();
+    if (back_to_submenu)
+        app_state_push(APP_STATE_SUBMENU);
+}
+
+static void page_audio_enter(void) {
+    // from the top, with the first heading
+    lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+    update_rows();
+    scroll_to_selection();
+}
+
+static void page_audio_exit(void) {
+    // submenu_exit() has already set the main menu state
+    release_slider(false);
+    audio_mixer_save();
+    selected_test_active = false;
+    // previewed from the main menu as when it was first shown: from the top, no hint
+    lv_label_set_text(hint, "");
+    lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+}
+
+// a mixer value of ripples' (Live Volume, the gains) also in g_setting.record, which ripples' code reads
+static void mirror_ripples(void) {
+    g_setting.record.live_audio_volume = audio_mixer_get(AUDIO_MIXER_LIVE_VOLUME);
+    g_setting.record.mic_gain = audio_mixer_get(AUDIO_MIXER_MIC_GAIN);
+    g_setting.record.linein_gain = audio_mixer_get(AUDIO_MIXER_LINEIN_GAIN);
+    g_setting.record.audio_source = audio_mixer_get(AUDIO_MIXER_SOURCE);
+}
+
+static void page_audio_on_roller(uint8_t key) {
+    if (selected_test_active) {
+        // ripples: the dial picks a test button while Run Test holds the focus
+        if (key == DIAL_KEY_UP) {
+            selected_test_mode = selected_test_mode == 0 ? AUDIO_TEST_COUNT - 1 : selected_test_mode - 1;
+        } else if (key == DIAL_KEY_DOWN) {
+            selected_test_mode = (selected_test_mode + 1) % AUDIO_TEST_COUNT;
+        }
         return;
     }
+    if (g_app_state != APP_STATE_SUBMENU_ITEM_FOCUSED || focused < 0) {
+        // the selection moved
+        scroll_to_selection();
+        update_hint();
+        return;
+    }
+
+    const row_t *row = &rows[sel_row[focused]];
+    int value = slider_value(row);
+
+    // same direction as the other slider pages
+    if (key == DIAL_KEY_UP && value > 0) {
+        value--;
+    } else if (key == DIAL_KEY_DOWN && value < slider_max(row)) {
+        value++;
+    } else {
+        return;
+    }
+
+    if (row->type == ROW_DVR_VOLUME) {
+        g_setting.record.dvr_audio_volume = value;
+        dvr_volume_changed = true;
+        update_rows();
+        return;
+    }
+    if (row->type == ROW_LIVE_VOLUME)
+        audio_mixer_set_live_volume(value);
+    else
+        audio_mixer_set(row->field, value);
+    mirror_ripples();
+    // the "Mix" marks, the A/V In level (Live Volume) and the hint follow
+    update_rows();
+    audio_mixer_apply();
+    // saved on release, or once the dial rests
+    lv_timer_reset(save_timer);
+    lv_timer_resume(save_timer);
+}
+
+static void page_audio_on_click(uint8_t key, int sel) {
+    (void)key;
 
     if (selected_test_active) {
         if (audio_test_running)
@@ -636,42 +971,79 @@ static void page_audio_on_click(uint8_t key, int sel) {
         return;
     }
 
-    if (sel == ROW_RECORD_AUDIO) {
-        btn_group_toggle_sel(&btn_group_record_audio);
-        g_setting.record.audio = !btn_group_get_sel(&btn_group_record_audio);
+    if (sel < 0 || sel >= sel_count) {
+        return;
+    }
+
+    const int r = sel_row[sel];
+    const row_t *row = &rows[r];
+
+    switch (row->type) {
+    case ROW_SLIDER:
+    case ROW_LIVE_VOLUME:
+    case ROW_DVR_VOLUME:
+        if (!hdmi_level_usable(row))
+            break; // (greyed: the hint says why)
+        if (focused == sel) {
+            release_slider(true);
+        } else {
+            release_slider(false);
+            focused = sel;
+            dvr_volume_changed = false;
+            app_state_push(APP_STATE_SUBMENU_ITEM_FOCUSED);
+            lv_obj_add_style(sliders[r].slider, &style_silder_select, LV_PART_MAIN);
+        }
+        break;
+    case ROW_RECORD_AUDIO:
+        // ripples
+        g_setting.record.audio = !g_setting.record.audio;
         settings_put_bool("record", "audio", g_setting.record.audio);
-        update_visibility();
-    } else if (sel == ROW_AUDIO_SOURCE) {
-        btn_group_toggle_sel(&btn_group_audio_source);
-        g_setting.record.audio_source = btn_group_get_sel(&btn_group_audio_source);
-        ini_putl("record", "audio_source", g_setting.record.audio_source, SETTING_INI);
-    } else if (sel == ROW_RUN_TEST) {
+        update_rows();
+        break;
+    case ROW_SOURCE:
+        // ripples' Audio Source, the next one: the preset of the Record switches below
+        audio_mixer_set_source((audio_mixer_get(AUDIO_MIXER_SOURCE) + 1) % 3);
+        mirror_ripples();
+        audio_mixer_save();
+        update_rows();
+        audio_mixer_apply();
+        break;
+    case ROW_SWITCH:
+        if (in_mix(row))
+            break; // (greyed: recorded through the mix whatever it says)
+        audio_mixer_set(row->field, !switch_value(row));
+        audio_mixer_save();
+        update_rows();
+        audio_mixer_apply();
+        break;
+    case ROW_TEST:
         if (audio_test_running || dvr_is_recording)
             return;
         selected_test_active = true;
         app_state_push(APP_STATE_SUBMENU_ITEM_FOCUSED);
-    } else if (sel == ROW_DVR_AUDIO_VOLUME || sel == ROW_LIVE_AUDIO_VOLUME ||
-               sel == ROW_MIC_GAIN || sel == ROW_LINEIN_GAIN) {
-        slider_group_t *slider_group;
-
-        selected_slider_row = sel;
-        selected_slider_changed = false;
-        slider_group = page_audio_selected_slider();
-
-        app_state_push(APP_STATE_SUBMENU_ITEM_FOCUSED);
-        if (slider_group != NULL)
-            lv_obj_add_style(slider_group->slider, &style_silder_select, LV_PART_MAIN);
+        break;
+    case ROW_HDMI_OUT:
+        // stored only: in effect from the next start (core/hdmi_audio.h)
+        hdmi_audio_set(!hdmi_audio_out_enabled(), hdmi_audio_in_enabled());
+        update_rows();
+        break;
+    case ROW_HDMI_IN:
+        hdmi_audio_set(hdmi_audio_out_enabled(), !hdmi_audio_in_enabled());
+        update_rows();
+        break;
+    default:
+        break;
     }
 }
 
 page_pack_t pp_audio = {
     .p_arr = {
         .cur = 0,
-        .max = ROW_BACK + 1,
+        .max = 0, // the selectable rows, counted by page_audio_create()
     },
     .name = "Audio",
     .create = page_audio_create,
-    .enter = NULL,
+    .enter = page_audio_enter,
     .exit = page_audio_exit,
     .on_created = NULL,
     .on_update = page_audio_update_test_indicator,
