@@ -57,14 +57,36 @@ position, however busy the goggle was meanwhile.
   says it has started or stopped, at most those 2 s (the owner's `dvr_dbg.log`: well under a second), and
   the reader thread never waits.
 
-## Commands that never arrive
+## Commands that never arrive: set the radio's Telem Ratio to 1:16
 
-In the owner's test (juricabi.2-e2d88c7, Goggle 1, backpack 1.5.9) 7 of about 29 commands were missing:
-a start after a start, a stop after a stop. The goggle's side logged no CRC failure and no overflow (it
-logs both), and it has one reader for the backpack's line: everything the goggle's backpack chip sent
-arrived. The same radio drives the owner's Orqa without misses. So those commands were lost on the way
-into the HDZero goggle's built-in backpack chip, over the air or inside it, where the goggle firmware
-cannot see. When it happens, the next switch change puts the DVR right.
+**On the radio, ExpressLRS Lua: Telem Ratio 1:16 (or 1:32) instead of Std.** With Std at 250 Hz or
+500 Hz about one DVR switch change in four never reaches the HDZero goggle.
+
+What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem Ratio Std):
+
+* About 1 in 4 commands was missing (a start after a start, a stop after a stop), whatever the goggle
+  firmware did. The goggle's side logged no CRC failure and no overflow; a debug build of the backpack
+  (its log goes to `HDZGOGGLE.log` as `[ESP]` lines) showed that the goggle's backpack chip never received
+  the missing ones.
+* Every command that did arrive came on a **256.0 ms grid**, within a few ms (41 of 41 in one run). Not
+  changed by: head tracking off, the goggle's WiFi off, the radio 10 cm away, WiFi power save off on the
+  chip (it stayed on channel 1 throughout).
+* 256 ms is the ELRS transmitter's telemetry cycle: with Std the TX listens instead of sending once every
+  64 packets at 250 Hz (64 x 4 ms) and once every 128 at 500 Hz (128 x 2 ms) (ExpressLRS
+  `src/src/common.cpp`, `TLMinterval`; `UpdateTlmRatioEffective()` in `tx_main.cpp`). The backpack's
+  ESP-NOW packet, sent from the same module on the same 2.4 GHz band, reached the goggle's chip only in
+  that silent slot. The radio's backpack tries a packet for roughly 190 ms (inferred from the loss rate):
+  a change made in the first ~65 ms after a slot is given up before the next one, 65 / 256 = 25 %. Changes
+  in quick succession lose every second packet (seen as "start, start, start", 256 ms apart).
+* With Telem Ratio 1:16 the slot comes every 64 ms: 24 of 24 changes arrived, the 256 ms grid was gone
+  and a 64 ms grid took its place (the owner's log of 2026-11-20). The cost is about 6 % of the control
+  packets (250 -> 234 a second).
+
+Not explained: the owner's ESP32-C3 backpack on an Orqa goggle works with Std on the same radio. Not
+tested: 500 Hz, Race (no telemetry slot at all while armed), other goggles.
+
+A command that is lost all the same leaves the DVR in the old state until the next switch change (in the
+log: a start after a start, or a stop after a stop).
 
 ## The log
 
