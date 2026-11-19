@@ -3,14 +3,14 @@
 # (src/record/hdmi_boot.c), the shared sunxi_dump access (src/record/soc_reg.c,
 # system_exec_sunxi_dump() in src/util/system.c), the IT66121 Reg04 guard (src/driver/it66121.c),
 # the IT66021 EDID (src/driver/it66021.c) and the record daemon's bridge (src/record/pcmbridge.c).
-# (On ripples-all the module bay's mutants, src/module/module.c, are all in
+# (In juricabi's firmware the module bay's mutants, src/module/module.c, are all in
 # utilities/module_bay_test/mutants.sh.) Each mutant is a copy of src/ with one safety property
 # broken (a perl substitution); the test that covers it runs against the copy
 # (SRC_TOP=<copy> for utilities/probe/test/*.sh) and must FAIL. A test that hangs is stopped (TEST_TIMEOUT) and counts
 # as a failure. Mutants marked EQUIV cannot change any outcome (the reason is given); they are run
 # and reported but do not count.
 #   utilities/probe/test/c_mutants.sh [name filter]     (~20 minutes; from the git worktree, or
-#   with BASE_SRC=<a tree of ripples-base 4fbb865> for the IT66121 / IT66021 tests)
+#   with BASE_SRC=<a tree of ripples 1.2.2 (4fbb865)> for the IT66121 / IT66021 tests)
 # The tests only touch files of their own (stand-ins for sysfs, temporary directories); this
 # script needs no root and refuses none.
 set -u

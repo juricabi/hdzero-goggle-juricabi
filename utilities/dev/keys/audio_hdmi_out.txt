@@ -1,4 +1,4 @@
-# Goggle 1, Goggle 2 or BoxPro (ripples-all), started in the main menu: the Audio page's HDMI Out Audio row
+# Goggle 1, Goggle 2 or BoxPro (juricabi), started in the main menu: the Audio page's HDMI Out Audio row
 # (k w 3 from the first row: Back, HDMI In Audio, HDMI Out Audio), its hint, then a click (c01): without the
 # HDMI audio probe's GO (EMU_EXTSD_FILE=hdmi_audio_go.txt for emu_run.sh) nothing is written and the row
 # says to run the probe first; with it [hdmi] audio_out=1 is written and the row shows "Restart"

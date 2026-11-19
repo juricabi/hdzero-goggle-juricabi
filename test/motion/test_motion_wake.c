@@ -11,14 +11,14 @@ static int power_on_calls, power_off_calls, tune_calls;
 static int hdz_open_calls, hdz_close_calls, hdz_tune_calls;
 static bool idle_inhibited;
 static int expected_rx;
-static bool rx_audio; // the audio mixer's Built-in RX Audio (ripples-all), set by the test
+static bool rx_audio; // the audio mixer's Built-in RX Audio (juricabi), set by the test
 static uint8_t brightness;
 
 static void analog_init(bool power, bool audio) {
     assert(idle_inhibited);
     if (power) {
         power_on_calls++;
-        // ripples-all: the receiver's audio is the Audio page's Built-in RX Audio, which may differ
+        // juricabi: the receiver's audio is the Audio page's Built-in RX Audio, which may differ
         // from what ripples' Audio Source would give (on with A/V In)
         assert(audio == rx_audio);
     } else {
@@ -61,7 +61,7 @@ void DM6302_SetChannel(uint8_t band, uint8_t channel) {
     hdz_tune_calls++;
 }
 void beep_dur(int ms) {}
-// the audio mixer (ripples-all): Built-in RX Audio, what ht.c must hand the receiver on power-on
+// the audio mixer (juricabi): Built-in RX Audio, what ht.c must hand the receiver on power-on
 bool audio_mixer_rx_audio(void) { return rx_audio; }
 int log_printf(const char *file, const char *func, int line, const int level, const char *fmt, ...) { return 0; }
 

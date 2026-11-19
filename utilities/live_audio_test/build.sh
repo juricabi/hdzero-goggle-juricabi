@@ -10,7 +10,7 @@
 #   record_host_fast  the same, stream audio stopped 300 ms (not 3 s) after the reader leaves
 #   stream_reader the real ring reader holding /tmp/live.pid: rtspLive's audio track without a server
 #   gmsg          sends goggle messages (record start/stop, AI->AO loop, HDMI audio bridge, quit)
-#   ctl_conf      ripples-all: publishes a config snapshot and sends RECORD_CONFIG (or PAUSE, LIVE_STOP) like the
+#   ctl_conf      juricabi: publishes a config snapshot and sends RECORD_CONFIG (or PAUSE, LIVE_STOP) like the
 #                 app's DVR control
 #
 # Every file is compiled with -Wall -Wextra; warnings are kept in $WORK/build/*.warn.

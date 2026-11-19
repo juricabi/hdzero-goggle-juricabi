@@ -1,6 +1,6 @@
 # HDMI audio / pin probe kit (Goggle 1, Goggle 2, BoxPro)
 
-Background and the meaning of the results: docs/hdmi-audio.md (on `all`; on `ripples-all` it
+Background and the meaning of the results: docs/hdmi-audio.md (on `all`; in juricabi's firmware it
 comes with HDMI audio). The scripts do not depend on the firmware: the same kit as on `all`.
 For the module bay: part 3 below and Module Bay > Check Pins ([docs/module-bay.md](../../docs/module-bay.md)).
 
@@ -122,6 +122,6 @@ released. Send `bay_gpio_N.txt` and the contact/voltage notes.
   must fail on every one. `MUT_OLD=<dir>` also runs an older kit (the review's mutant). Not
   as root either (`utilities/dev/run_probe.sh mutants`).
 * The C tests of the HDMI audio code (`it66121_seq_test.sh`, `it66021_edid_test.sh`,
-  `hdmi_boot_test.sh`, `pcmbridge_test.sh`, `c_mutants.sh` on `all`) come to `ripples-all`
+  `hdmi_boot_test.sh`, `pcmbridge_test.sh`, `c_mutants.sh` on `all`) come to juricabi's firmware
   with that code. The module bay's register read and status mutants are in
   `utilities/module_bay_test/mutants.sh` here.

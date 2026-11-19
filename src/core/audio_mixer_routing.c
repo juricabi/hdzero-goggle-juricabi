@@ -17,7 +17,7 @@
  * The ADC input mixers are plain DAPM mixers (one bit per input in L/R_ADCMIX_SRC, summed), so
  * the output mixer and the direct inputs can be on together (docs/audio.md).
  *
- * ripples-all: the line-out volume is ripples' Live Volume, the preamps ripples' Mic Gain and
+ * juricabi: the line-out volume is ripples' Live Volume, the preamps ripples' Mic Gain and
  * Line/AV Gain, the ADC input gain ripples' Line/AV Gain unless only the mic is recorded (ripples
  * set it with Line In / A/V In as the Audio Source only, the mic recorded at the record daemon's
  * 0 dB). DVR playback is not routed here: ripples' playback code runs while the mixer is held.

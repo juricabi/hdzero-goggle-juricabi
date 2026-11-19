@@ -181,7 +181,7 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
         LOGI("audio mixer: from record/audio_source=%d live_audio_volume=%d (mixer version %ld)",
              rec->audio_source, rec->live_volume, version);
     } else {
-        // [mixer] of ripples-all or of all's firmware: its values; a field missing from it comes from
+        // [mixer] of juricabi's firmware or of all's firmware: its values; a field missing from it comes from
         // ripples' state
         section_written = true;
         mixer = defaults;

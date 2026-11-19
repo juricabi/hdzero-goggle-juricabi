@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The answers to the backpack's MSP_GET_BAND_CHAN / MSP_GET_FREQ (src/core/elrs.c), compiled on their own
-with stand-ins for the goggle's state: ripples-base's answers (the stored analog channel), the module
+with stand-ins for the goggle's state: ripples 1.2.2's answers (the stored analog channel), the module
 bay's own channel only while the goggle tunes a bay module.
 
     utilities/module_bay_test/test_msp_answers.py [elrs.c]
@@ -49,7 +49,7 @@ int main(void) {
     bay_channel = 33;                    // the bay module's own channel
 
     g_source_info.source = SOURCE_AV_MODULE;
-    tunable = false; // Goggle 1 Module None, Goggle 2 Expansion: ripples-base's answer, the stored channel
+    tunable = false; // Goggle 1 Module None, Goggle 2 Expansion: ripples 1.2.2's answer, the stored channel
     CHECK("bay module not controlled: BAND_CHAN = the stored channel's index", msp_band_chan_answer() == 4);
     CHECK("bay module not controlled: FREQ = the stored channel's frequency", msp_freq_answer() == freq_table[4]);
     tunable = true; // built-in receiver, or a bay module under module control: the channel received

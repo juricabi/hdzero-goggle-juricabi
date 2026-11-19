@@ -1,5 +1,5 @@
 #!/bin/bash
-# ripples-all: the app's DVR control (src/core/dvr.c) hands the recorder config snapshots, copies of
+# juricabi: the app's DVR control (src/core/dvr.c) hands the recorder config snapshots, copies of
 # record.conf made when the app started (ctl_conf stands in for it). Stream Audio, which the WiFi page
 # writes into record.conf later, must still decide the stream: the recorder reads [live] from the file it
 # chose at its start, not from the snapshot.

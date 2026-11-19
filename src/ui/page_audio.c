@@ -23,7 +23,7 @@
 #include "wav_test.h"
 
 /*
- * Audio page, ripples-all: ripples' page (Record Audio, Audio Source, DVR Playback, Live Volume, Mic
+ * Audio page, juricabi: ripples' page (Record Audio, Audio Source, DVR Playback, Live Volume, Mic
  * Gain, Line/AV Gain, the test buttons; its setting.ini keys) with the extras of all's mixer below it
  * (docs/audio.md): the headphone level of each source, the Record switches with the headphone mix,
  * the built-in receiver's audio, the two HDMI audio switches. One list in sections, scrolled so that

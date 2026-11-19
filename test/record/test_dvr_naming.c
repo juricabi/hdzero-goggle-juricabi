@@ -78,7 +78,7 @@ int ini_gets(const char *section, const char *key, const char *default_value,
     return snprintf(buffer, size, "%s", recording_type);
 }
 
-// the audio mixer (ripples-all): dvr.c's line out and routing calls
+// the audio mixer (juricabi): dvr.c's line out and routing calls
 void audio_mixer_set_line_out(bool enable) { (void)enable; }
 bool audio_mixer_apply_wait(unsigned timeout_ms) { (void)timeout_ms; return true; }
 int system_exec(const char *command) {

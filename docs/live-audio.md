@@ -7,7 +7,7 @@ With it off the stream is the video-only stream it always was.
 Applies to HDZero Goggle (WiFi on the expansion module), Goggle 2 (built-in WiFi) and BoxPro:
 they share `record`, `rtspLive`, the record conf and the WiFi page.
 
-**On `ripples-all`** (ripples' firmware 1.2.2 with this project's additions, docs/status.md): ported
+**In juricabi's firmware** (ripples' firmware 1.2.2 with this project's additions, docs/status.md): ported
 from `all` (082b2f5). `rtspLive` and the ring are `all`'s code (ripples had upstream's, but for
 its flush in the writer's `avshare_reset()`, kept for the video side of the ring; since phase 4 the
 audio side is left to the stream audio's writer, docs/status.md). ripples reworked the recorder
@@ -61,8 +61,8 @@ running, and never with Record Audio off**. Nothing feeds the audio side of the 
 `avshare_addAudio()` (record) and `avshare_readAudio()` (rtspLive) are unused leftovers
 (`addAudio` expects TS PES fragments; `readAudio` computes `tv_usec = ts*100/9` without a modulo).
 Input routing is not touched by this work: the stream carries whatever the codec's ADC captures
-on AI device 0, which is what the DVR records: the Audio page's recording rows (docs/audio.md: on
-`ripples-all` ripples' Audio Source, the preset of Record Mic / Line In / A/V In, Record Headphone
+on AI device 0, which is what the DVR records: the Audio page's recording rows (docs/audio.md: in
+juricabi's firmware ripples' Audio Source, the preset of Record Mic / Line In / A/V In, Record Headphone
 Mix and Line/AV Gain, the level). The headphone volume does not change it.
 
 ### The shared ring (`src/record/avshare.c` writer, `src/rtspLive/stream/avshare.c` reader)
@@ -126,7 +126,7 @@ file), `ADTSAudioStreamDiscreteFramer` (*adds* ADTS headers).
   is (re)started.
 - `[live] audio` is read by rtspLive at start (`conf_loadLiveParams()`) and by `record` when the
   audio reader connects (`conf_loadLiveAudio()`). Shipped `record.conf` has `audio=0`.
-- On `ripples-all` the recorder normally runs on ripples' DVR config snapshots: the app copies
+- In juricabi's firmware the recorder normally runs on ripples' DVR config snapshots: the app copies
   `record.conf` once when it starts (`src/core/dvr.c`) and hands the recorder edited copies with
   its own `[vi]`, `[venc]` and `[record]` keys. A Stream Audio change after that, or a hand edit of
   `[live]`, would never be in a snapshot, so the stream's audio reads its conf (`[live]`, `[ai]`,
@@ -144,7 +144,7 @@ file), `ADTSAudioStreamDiscreteFramer` (*adds* ADTS headers).
   ADTS, `[ai]`/`[aenc]` conf) starts, independent of recording and of Record Audio. It stops 3 s
   after the reader goes away (DESCRIBE and SETUP each connect, the delay avoids a restart in
   between); a failed start is retried after 5 s; a running chain that produces no frame for 2 s
-  is stopped and started again. On `ripples-all` the poll comes after ripples' pause check:
+  is stopped and started again. In juricabi's firmware the poll comes after ripples' pause check:
   while the recorder is paused around a source switch the chain is neither started nor stopped
   (it runs on; ripples' `avshare_reset()` then flushes the video side of the ring for the new
   video bitstream, and leaves the audio side to the stream audio's writer: no audio frame is
@@ -268,7 +268,7 @@ presentation times.
 | On, recording with audio / AI->AO loop at the same time | all run; start/stop of one does not stop the others or disable the device under them |
 | Client paused / slow | ring holds ~1.2 s of audio, then drops new frames; reader skips frames older than 1 s |
 | rtspLive killed / crashed | record stops the live video encoder within ~0.5 s and the audio chain 3 s later |
-| `ripples-all`: a source switch while streaming (the recorder paused, then resumed) | live video stops and comes back; the audio runs on (no frame lost: no pts gap over 1.5 AAC frames, 32 ms) |
+| juricabi: a source switch while streaming (the recorder paused, then resumed) | live video stops and comes back; the audio runs on (no frame lost: no pts gap over 1.5 AAC frames, 32 ms) |
 | Several clients | one shared source per track (`reuseFirstSource`), the ring has one reader per media |
 
 ## 3. Tests on the build host
@@ -291,7 +291,7 @@ libx265, python3, qemu-arm). The programs use the goggle's fixed paths and IPC k
 - Clients: ffprobe, ffmpeg captures, `rtsp_describe.py` (timed DESCRIBEs, overlapping),
   `rtsp_rtp.py` (RTP over RTSP/TCP: markers per access unit, NAL types, timestamp steps).
 
-| Test | Result (as measured on `all`; on `ripples-all`: the last two rows and docs/status.md, phase 2) |
+| Test | Result (as measured on `all`; in juricabi's firmware: the last two rows and docs/status.md, phase 2) |
 |---|---|
 | `ring_test` (x86, and ARM under qemu-arm) | 7254 checks, 0 failures: frames of 1..3 slots across wrap-arounds, overrun (whole frames dropped), peek, reconnect, partial-frame recovery, I frames of 40 slots (recover at the 2nd I frame; never without the 100 ms rule), legacy path, 200 000 frames with concurrent threads, a dead reader's stale flag ignored |
 | `t_describe.sh` (no audio produced) | first DESCRIBE 2.91 s (video start + 2.5 s), within the retry period 0.002 s, after it 2.51 s; three DESCRIBEs at +0 / +1.0 / +1.5 s all done at +2.51 s; was 5.1..5.4 s each, and LIFO |
@@ -304,8 +304,8 @@ libx265, python3, qemu-arm). The programs use the goggle's fixed paths and IPC k
 | `t_cpu.sh` (host) | rtspLive with audio 1375 -> 1066 wake-ups/s, 3.8 -> 3.0 % CPU; audio off 970..994 |
 | `t_off_identical.sh` | Stream Audio off: SDP (but `o=`) and RTP packets (marker, size, payload header, timestamp steps) identical to the 8364a43 rtspLive, H.264 and H.265 |
 | `t_arm.sh` | the shipped ARM rtspLive (live555 2022.12.01) under qemu-arm: `t_e2e.sh` 38/38, `t_describe.sh` 12/12 (2.82 s / 2.51 s / overlap +2.51 s / 0.57 s with audio), `t_kill.sh` 15/15 |
-| `t_snapshot.sh` (`ripples-all`) | `ctl_conf` publishes a config snapshot and sends `RECORD_CONFIG` like the app's DVR control; then Stream Audio changes in the recorder's start file: snapshot `audio=0` + Stream Audio On -> SDP with audio, the chain starts, frames reach the ring; snapshot `audio=1` + Stream Audio Off -> video-only SDP, "audio is off", no chain. 9/9; without the fix 2/9 (the recorder followed the snapshot) |
-| `t_pause.sh` (`ripples-all`) | while a client streams with audio, `ctl_conf` pauses the recorder (`RECORD_PAUSE`, as the app does before a source switch: live video stops, `avshare_reset()` flushes the video side of the ring) and resumes it 2 s later (`RECORD_LIVE_STOP` with a snapshot): the audio chain keeps running, no audio frame is lost (no pts gap over 32 ms, 1.5 AAC frames of 21.3 ms) and the audio stays in order, video is back after the resume. 7/7 |
+| `t_snapshot.sh` (juricabi) | `ctl_conf` publishes a config snapshot and sends `RECORD_CONFIG` like the app's DVR control; then Stream Audio changes in the recorder's start file: snapshot `audio=0` + Stream Audio On -> SDP with audio, the chain starts, frames reach the ring; snapshot `audio=1` + Stream Audio Off -> video-only SDP, "audio is off", no chain. 9/9; without the fix 2/9 (the recorder followed the snapshot) |
+| `t_pause.sh` (juricabi) | while a client streams with audio, `ctl_conf` pauses the recorder (`RECORD_PAUSE`, as the app does before a source switch: live video stops, `avshare_reset()` flushes the video side of the ring) and resumes it 2 s later (`RECORD_LIVE_STOP` with a snapshot): the audio chain keeps running, no audio frame is lost (no pts gap over 32 ms, 1.5 AAC frames of 21.3 ms) and the audio stays in order, video is back after the resume. 7/7 |
 
 Not testable without a goggle: the MPP AI/AENC chain itself (two or three AI channels at once,
 its real ADTS output and timestamps, chunk sizes, capture jitter), the VI pts clock, the
@@ -317,7 +317,7 @@ Allwinner encoder's NAL layout, the camera-to-goggle latency, memory ordering on
 - Multicast mode (`[live] multicast=1`): video only.
 - A goggle with a legacy `/data/confs/record.conf`: rtspLive reads that file (as upstream and
   ripples do), the WiFi page writes the app's `record.conf`, so Stream Audio has no effect there
-  (the same on `all`; on `ripples-all` the recorder prefers the app's file, ripples' rule).
+  (the same on `all`; in juricabi's firmware the recorder prefers the app's file, ripples' rule).
 - DESCRIBE waits for the first AAC frame (normally a few hundred ms; 2.5 s, once per 10 s, if
   none comes).
 - Recording with audio while streaming encodes the same PCM twice. One encoder for both was not

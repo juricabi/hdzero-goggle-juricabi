@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * Audio mixer for the V536 internal codec (all targets), ripples-all: ripples' Audio page (Record
+ * Audio mixer for the V536 internal codec (all targets), juricabi: ripples' Audio page (Record
  * Audio, Audio Source, DVR Playback, Live Volume, Mic Gain, Line/AV Gain, the test buttons) with
  * the extras of all's mixer (docs/audio.md).
  *

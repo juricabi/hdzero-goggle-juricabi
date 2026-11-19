@@ -1,4 +1,4 @@
-# Audio: the Audio page and the codec (ripples-all)
+# Audio: the Audio page and the codec (juricabi's firmware)
 
 All three targets (HDZero Goggle, Goggle 2, BoxPro) use the internal audio codec of the Allwinner
 V536 (`sun8iw16`, ALSA card `audiocodec`). The firmware drives it with `amixer`; the record daemon
@@ -6,7 +6,7 @@ captures the ALSA `default` device (48 kHz stereo, AAC). The control names and r
 of the device's `amixer contents` dump in `mkapp/app/app/record/audio/audiocodec/alsa-util/`, their
 meaning comes from the Allwinner driver (`sound/soc/sunxi/sun8iw16-codec.c` of the V536 BSP).
 
-On `ripples-all` the Audio page is **ripples' page** (firmware 1.2.2: Record Audio, Audio Source,
+In juricabi's firmware the Audio page is **ripples' page** (firmware 1.2.2: Record Audio, Audio Source,
 DVR Playback, Live Volume, Mic Gain, Line/AV Gain, the test buttons; its setting.ini keys) with the
 **extras of all's audio mixer** (082b2f5, this project's earlier firmware) below it. docs/status.md,
 phase 3, lists every overlap and how it was resolved.
@@ -267,11 +267,11 @@ rows keep ripples' keys in `[record]`. The mixer takes ripples' values from `set
   there is one. Nothing is written. all's own keys (`headphones`, `playback`, `mic_boost`,
   `line_in_boost`, `dvr_level`) are never written or removed, so all's firmware reads them as
   it left them.
-* **Back to ripples 1.2.2**: ripples reads its own keys as ripples-all wrote them and ignores
+* **Back to ripples 1.2.2**: ripples reads its own keys as juricabi's firmware wrote them and ignores
   `[mixer]` and `[hdmi]`.
 * **A `[mixer]` of all's unreleased version 1, or one cut short by a power loss** before its
   version was written: ripples' state, the section removed (one write).
-* **ripples-all, then stock ripples, then ripples-all again**: every `[mixer]` this firmware
+* **juricabi, then stock ripples, then juricabi again**: every `[mixer]` this firmware
   writes also holds the `[record]` values its values belong to, `record_source` (Audio Source) and
   `record_live` (Live Volume). When stock ripples changed `[record] audio_source` since, the
   Record switches and Built-in RX Audio follow the new Audio Source as its row would set them;
@@ -398,7 +398,7 @@ the worker thread, a simulated codec that takes the batches) and checks the resu
   Line In heard and Record Headphone Mix on: only the file is heard, nothing recorded through the
   output mixers, the timeslot volumes back afterwards; the Mic test records the mic alone; a test
   that ends while a file plays does not end the player's hold.
-* the round trip ripples-all -> stock ripples -> ripples-all: Audio Source and Live Volume changed
+* the round trip juricabi -> stock ripples -> juricabi: Audio Source and Live Volume changed
   by ripples win, nothing written at the start, the next change writes them, what ripples did not
   change stays.
 * migration equivalence against ripples' firmware: libmedia_mpp's reset, then ripples' `dvr.c`
