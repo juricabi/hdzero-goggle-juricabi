@@ -34,7 +34,7 @@ Do the sections in order. Do not change any setting before section 4 is done.
    | BoxPro | `HDZERO_BOXPRO-77-211-1.2.2-ripples.bin` | 9676800 | `6f81a8ba074d00339a7817838051844f993c6d94bfb9203dff8c348f7c22fdfd` |
 
 2. **The official HDZero recovery package** of your goggle, from https://www.hd-zero.com/document: the last
-   resort (section 8.2). Copies examined for this project's docs:
+   resort (section 9.2). Copies examined for this project's docs:
    * Goggle 1: `HDZEROGOGGLE_Rev20250319.zip`, 25,300,568 bytes, SHA-256
      `17cba93bbd29c20a5c011947c368a65d10b1d6c2fd8ad6715138c5f349475fe7` (it holds
      `HDZERO_GOGGLE-75-200-9.5.0.bin` and `Recovery/` with `HDZG_BOOT.bin`, `HDZG_OS.bin`,
@@ -71,7 +71,7 @@ It must print `True`. If a hash differs, download the file again; never flash a 
 
 Also write down (or photograph) the settings you care about. ripples' update script copies `setting.ini` to
 `/mnt/UDISK/` before it writes the app partition; whether the base firmware's `hdz_upgrade_app.sh` (not in this
-repository) puts it back afterwards, and what a recovery (section 8.2) keeps, was not checked.
+repository) puts it back afterwards, and what a recovery (section 9.2) keeps, was not checked.
 
 ## 2. The SD card: only the one image on its root
 
@@ -97,7 +97,7 @@ Why, from the code:
 * At every boot `rc.sh` acts on recovery files on the card's root, before the app starts: `HDZG_BOOT.bin`
   (`HDZB_BOOT.bin` on the BoxPro) is written to the boot loader, `HDZG_OS.bin` is deleted, and
   `HDZGOGGLE_RX.bin` / `HDZGOGGLE_VA.bin` are written to the receiver and VA flash (`write_flashes.sh`). Keep them
-  off the card unless you mean that (section 8.2).
+  off the card unless you mean that (section 9.2).
 
 With one image on the card there is nothing to choose wrongly.
 
@@ -124,7 +124,7 @@ With one image on the card there is nothing to choose wrongly.
 
 If the row shows **"No firmware found."** or **"FAILED"** (red) instead: read section 2 again; with the right
 single image, flash once more. If it still fails, put only ripples' official image on the card and flash it the
-same way (section 8.1); if the goggle no longer reaches its menu, section 8.2. A "FAILED" from one of the
+same way (section 9.1); if the goggle no longer reaches its menu, section 9.2. A "FAILED" from one of the
 script's refusals (section 2) has written nothing.
 
 **Goggle 2 / BoxPro**: the same page and texts; the script is `update_goggle2.sh` / `update_boxpro.sh`
@@ -150,7 +150,7 @@ Change no setting yet. Check each item against what the goggle did with ripples'
 7. **ELRS backpack**, if you use it: as before.
 8. **Standby and wake**: as you usually do.
 
-If something that worked with ripples' 1.2.2 does not work now, go back (section 8.1) and report what you saw.
+If something that worked with ripples' 1.2.2 does not work now, go back (section 9.1) and report what you saw.
 
 ### What looks different from ripples 1.2.2
 

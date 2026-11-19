@@ -55,7 +55,7 @@ and an independent review ([docs/status.md](docs/status.md)). Flash it only if y
   analog-module-control code).
 * **live555** (`lib/live`, used by the live stream server as upstream; LGPL) and the other libraries under `lib/`
   under their own licences.
-* ITE's public IT6602/IT66021 driver and the ITE and Allwinner data sheets in `docs/`: read for the HDMI audio work
+* ITE's public IT6602/IT66021 driver and ITE's data sheets in `docs/` (already in the original firmware's repository): read for the HDMI audio work
   (docs/hdmi-audio.md lists the sources).
 
 ripples' donation link in the README below supports ripples' work, not juricabi's firmware.
