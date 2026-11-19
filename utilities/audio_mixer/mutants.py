@@ -6,7 +6,8 @@
 Each mutant is one small change to a copy of src/core/audio_mixer*.c; test_mixer.py runs against
 the copy (--src). all's mutants (082b2f5) that still apply, the ones of all's reviews among them,
 and the ones of ripples-all's own rules (ripples' controls, the presets, the settings both ways,
-hold). Exit status 1 if a mutant survives (or the unmodified copy fails).
+hold), and the fixes of the review of phase 3 (the held batch, holders, the timeslot volumes, the round
+trip through stock ripples). Exit status 1 if a mutant survives (or the unmodified copy fails).
 """
 
 import concurrent.futures
@@ -58,7 +59,7 @@ MUTANTS = [
     ("load: a version 1 or cut-short section left behind", M, [
         ("            ini_puts(AUDIO_MIXER_SECTION, NULL, NULL, SETTING_INI);", "            (void)key;")]),
     ("load: [mixer] written at start-up (stock setting.ini)", M, [
-        ("        mixer = defaults;\n        char key[32];", "        mixer = defaults;\n        ini_putl(AUDIO_MIXER_SECTION, \"version\", AUDIO_MIXER_VERSION, SETTING_INI);\n        char key[32];")]),
+        ("        char key[32];\n", "        ini_putl(AUDIO_MIXER_SECTION, \"version\", AUDIO_MIXER_VERSION, SETTING_INI);\n        char key[32];\n")]),
     ("save: the version never written", M, [("    if (wrote_mixer && !section_written) {", "    if (wrote_mixer && !section_written && 0) {")]),
     ("save: the version written first", M, [
         ("    bool wrote_mixer = false;\n", "    bool wrote_mixer = false;\n    if (!section_written)\n        ini_putl(AUDIO_MIXER_SECTION, \"version\", AUDIO_MIXER_VERSION, SETTING_INI);\n")]),
@@ -183,14 +184,46 @@ MUTANTS = [
     ("all's firmware: playback mapped to the nearest level below", M, [
         ("        if (line_out[level] >= playback)\n            return level;", "        if (line_out[level] > playback)\n            return level - 1;")]),
     ("all's firmware: Audio Source not from its Record switches", M, [
-        ("        if (direct == 1)\n", "        if (direct == 99)\n")]),
+        ("        if (direct == 1 && file_basis_source == NO_KEY)\n", "        if (direct == 99 && file_basis_source == NO_KEY)\n")]),
     ("save: ripples' keys written without a change", M, [
-        ("        if (current.value[i] != saved.value[i]) {", "        if (current.value[i] != saved.value[i] || strcmp(field_ini[i].section, RECORD_SECTION) == 0) {")]),
+        ("        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i))) {",
+         "        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i)) || strcmp(field_ini[i].section, RECORD_SECTION) == 0) {")]),
+    # ---- the round trip ripples-all -> stock ripples -> ripples-all (review of phase 3, finding 2)
+    ("round trip: record_source ignored", M, [
+        ("    if (file_basis_source != NO_KEY && file_basis_source != rec->audio_source) {",
+         "    if (file_basis_source != NO_KEY && file_basis_source != rec->audio_source && 0) {")]),
+    ("round trip: record_live ignored", M, [
+        ("    if (file_basis_live != NO_KEY && file_basis_live != rec->live_volume) {",
+         "    if (file_basis_live != NO_KEY && file_basis_live != rec->live_volume && 0) {")]),
+    ("round trip: record_source not written", M, [
+        ("            ini_putl(AUDIO_MIXER_SECTION, \"record_source\", file_basis_source, SETTING_INI);\n", "")]),
+    ("round trip: record_live not written", M, [
+        ("            ini_putl(AUDIO_MIXER_SECTION, \"record_live\", file_basis_live, SETTING_INI);\n", "")]),
+    ("round trip: values that follow ripples not written with the next change", M, [
+        ("        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i))) {", "        if (current.value[i] != saved.value[i]) {")]),
+    ("this firmware's [mixer]: the Audio Source from the Record switches (all's rule)", M, [
+        ("        if (direct == 1 && file_basis_source == NO_KEY)\n", "        if (direct == 1)\n")]),
+    ("save: a missing field that [record] would change not written", M, [
+        ("            from_record.value[i] != current.value[i]) {", "            from_record.value[i] != current.value[i] && 0) {")]),
+    ("save: [record] not brought in line with all's values", M, [
+        ("        if (file_source != current.value[AUDIO_MIXER_SOURCE]) {", "        if (file_source != current.value[AUDIO_MIXER_SOURCE] && 0) {")]),
 
     # ---- hold (ripples' playback and test buttons)
     ("hold: batches written while held", M, [
         ("    if (held) {\n        // ripples' own code drives the codec", "    if (0) {\n        // ripples' own code drives the codec")]),
-    ("hold: nothing applied on release", M, [("    if (changed && !hold) {", "    if (changed && !hold && 0) {")]),
+    ("hold: nothing applied on release", M, [("    if (released) {", "    if (released && 0) {")]),
+    # (review of phase 3, findings 1, 4, 5, 7)
+    ("hold: no held batch (the page's headphone sources heard with a DVR file)", M, [("    if (taken) {\n        // the mixer's own live paths out", "    if (taken && 0) {\n        // the mixer's own live paths out")]),
+    ("held batch: the mic stays in the output mixers", R, [
+        ('        "Left Output Mixer MIC1Booststage Switch", "Right Output Mixer MIC1Booststage Switch",\n', "")]),
+    ("held batch: Line In stays in the output mixers", R, [
+        ('        "Left Output Mixer MIC2Booststage Switch", "Right Output Mixer MIC2Booststage Switch",\n', "")]),
+    ("held batch: the recorded mix stays (a test records the headphone mix)", R, [
+        ('        "LADC input Mixer l_output mixer Switch",  "RADC input Mixer r_output mixer Switch",\n', "")]),
+    ("hold: one release ends every holder's hold", M, [
+        ("    held = hold ? (held | holder) : (held & ~(unsigned)holder);", "    held = hold ? (held | holder) : 0;")]),
+    ("AIF1 DAC timeslot volumes not the mixer's (DVR Playback leaks into HDMI-in audio)", R, [
+        ('    cset(&cb, "AIF1 DAC timeslot 0 volume", DIGITAL_VOLUME_OLD);\n    cset(&cb, "AIF1 DAC timeslot 1 volume", DIGITAL_VOLUME_OLD);\n', "")]),
     ("hold: the watcher keeps applying while held", M, [
         ("        while (held)\n            pthread_cond_wait(&work_cond, &mixer_mutex);\n        while (applied == requested && !held) {",
          "        while (applied == requested) {"),

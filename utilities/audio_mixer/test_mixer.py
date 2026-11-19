@@ -17,7 +17,8 @@ For every target (Goggle, Goggle 2, BoxPro):
               the presets of ripples' rows (Audio Source, Live Volume); the first change
   settings    compatibility both ways (docs/audio.md): a setting.ini of stock ripples 1.2.2, one of
               all's firmware (082b2f5), a fresh one: the values in effect, nothing written at
-              start-up, nothing written by a save without a change, all's keys kept for all
+              start-up, nothing written by a save without a change, all's keys kept for all; the
+              round trip ripples-all -> stock ripples -> ripples-all (Audio Source, Live Volume)
   migration   ripples' firmware (libmedia_mpp reset + ripples' dvr.c and audio_sel.sh) vs the mixer,
               per Audio Source and Live Volume: recording, headphones, line out power and the
               receiver's audio switch must be the same (the documented difference: booting
@@ -25,7 +26,10 @@ For every target (Goggle, Goggle 2, BoxPro):
   transitions a change never leaves the line out / the recording without a source in between,
               and a source recorded before and after is recorded all the way through
   worker      apply never blocks, a burst of steps coalesces, setting.ini only on save; set()
-              clamps; hold: nothing written while held, the state applied on release
+              clamps; hold: only the held batch while held, the state applied on release
+  hold        ripples' DVR playback and test paths while held: no headphone source of the page heard
+              with the file, a test records only its source, the AIF1 DAC timeslot volumes back
+              afterwards; two holders (playback and a test) hold independently
   watcher     a libmedia_mpp reset after the routing is undone; the cost of a pass; a control the
               codec does not keep, a codec that cannot be read, an amixer that fails: retried
               with a backoff, never a loop, never given up; recheck looks at once; not while held
@@ -439,7 +443,8 @@ def test_loading(h):
             written = section(after, "mixer")
             if got != want:
                 fail(test, f"got {got}, want {want}")
-            elif written != {"hdmi": "5", "version": VERSION, "phones_at_boot": "1"}:
+            elif written != {"hdmi": "5", "version": VERSION, "phones_at_boot": "1",
+                             "record_source": str(audio_source), "record_live": "10"}:
                 fail(test, f"[mixer] after a change written as {written}")
             else:
                 ok(test)
@@ -479,7 +484,8 @@ def test_loading(h):
     else:
         ok(test)
 
-    # the first change: only the changed fields ([mixer] ones, then the version; ripples' in [record])
+    # the first change: only the changed fields ([mixer] ones and the [record] values they belong to,
+    # then the version; ripples' in [record])
     test = f"{h.target} first change on the Audio page"
     ini = QUIET + "[record]\naudio_source=1\n"
     _, _, _, _, after = h.run(ini, START + ["set mic 3", "set mic_gain 6", "save", "save"])
@@ -488,7 +494,7 @@ def test_loading(h):
     _, queries, _, _, _ = h.run(after, START + [f"get {k}" for k in KEYS])
     got = gets(queries)
     want = dict(migration_spec(1, mic_gain=6), mic=3, phones_at_boot=1)
-    if sorted(lines[:-1]) != ["mic=3", "phones_at_boot=1"] or lines[-1:] != [f"version={VERSION}"]:
+    if sorted(lines[:-1]) != ["mic=3", "phones_at_boot=1", "record_live=10", "record_source=1"] or lines[-1:] != [f"version={VERSION}"]:
         fail(test, f"[mixer] written as {lines}")
     elif record != [("audio_source", "1"), ("mic_gain", "6")]:
         fail(test, f"[record] written as {record}")
@@ -596,8 +602,15 @@ def test_settings(h):
         _, queries, _, _, after = h.run(ini, START + ["set_live 8", "set hdmi 2", "save"])
         kept = section(after, "mixer")
         lost = [k for k in ALL_ONLY_KEYS if kept.get(k) != str(mixer[k])]
+        # ... and the next start shows what the page showed (the Audio Source as well)
+        _, queries, _, _, _ = h.run(after, START + [f"get {k}" for k in KEYS])
+        again = gets(queries)
+        # (a headphone level changed: the headphones from boot on)
+        want_again = dict(want, live_audio_volume=8, hdmi=2, av=live_linein_gain(8) + 1, phones_at_boot=1)
         if lost or kept.get("version") != VERSION or "live_audio_volume=8" not in after or kept.get("hdmi") != "2":
             fail(test, f"after a change: all's keys changed or lost {lost}, [mixer] {kept}")
+        elif again != want_again:
+            fail(test, f"after a change and a restart: {again}, want {want_again}")
         else:
             ok(test)
 
@@ -610,6 +623,79 @@ def test_settings(h):
         fail(test, f"stock ripples would read {query(queries, 'REC ')}, want REC 2 6 8 2 6")
     else:
         ok(test)
+
+    test_round_trip(h)
+
+
+def ripples_putl(text, key, value):
+    """stock ripples' ini_putl("record", key, value): the value replaced in place, or the key added"""
+    if re.search(r"(?m)^%s=" % re.escape(key), section_text(text, "record")):
+        head, rec, tail = split_section(text, "record")
+        return head + re.sub(r"(?m)^(%s=).*$" % re.escape(key), r"\g<1>%d" % value, rec) + tail
+    if "[record]\n" in text:
+        return text.replace("[record]\n", f"[record]\n{key}={value}\n", 1)
+    return text + f"[record]\n{key}={value}\n"
+
+
+def split_section(text, name):
+    m = re.search(r"(?ms)^\[%s\]\n.*?(?=^\[|\Z)" % re.escape(name), text)
+    return (text[:m.start()], text[m.start():m.end()], text[m.end():]) if m else (text, "", "")
+
+
+def section_text(text, name):
+    return split_section(text, name)[1]
+
+
+ROUND_KEYS = ["rec_mic", "rec_line_in", "rec_av", "rx_audio", "av", "audio_source", "live_audio_volume"]
+
+
+def test_round_trip(h):
+    """ripples-all -> stock ripples -> ripples-all (review of phase 3, finding 2): what stock ripples
+    changed in [record] wins over the [mixer] values derived from the earlier [record] values; nothing
+    is written at the start; the next change writes them; what ripples did not change stays."""
+    cases = (
+        # name, ripples-all steps, the [record] edit of stock ripples, values in effect afterwards
+        ("Audio Source Line In, then ripples Mic", ["set_source 1"], ("audio_source", 0),
+         dict(rec_mic=1, rec_line_in=0, rec_av=0, rx_audio=0, audio_source=0)),
+        ("Audio Source Line In, then ripples A/V In", ["set_source 1"], ("audio_source", 2),
+         dict(rec_mic=0, rec_line_in=0, rec_av=1, rx_audio=1, audio_source=2)),
+        ("Live Volume 3, then ripples 10", ["set_live 3"], ("live_audio_volume", 10),
+         dict(av=live_linein_gain(10) + 1, live_audio_volume=10)),
+        ("Live Volume 3 and a trimmed A/V In, then ripples 7", ["set_live 3", "set av 6"], ("live_audio_volume", 7),
+         dict(av=live_linein_gain(7) + 1, live_audio_volume=7)),
+        # not changed by ripples: the page's own Record switches stay, and so does its Audio Source
+        ("own Record switches (Line In only, Audio Source Mic), ripples wrote the same Audio Source",
+         ["set rec_mic 0", "set rec_line_in 1"], ("audio_source", 0),
+         dict(rec_mic=0, rec_line_in=1, rec_av=0, rx_audio=0, audio_source=0)),
+        ("own Record switches, ripples wrote the same Audio Source", ["set_source 1", "set rec_mic 1", "set av 5"],
+         ("audio_source", 1), dict(rec_mic=1, rec_line_in=1, rec_av=0, rx_audio=0, av=5, audio_source=1)),
+    )
+    for name, steps, (key, value), want in cases:
+        test = f"{h.target} settings: round trip, {name}"
+        _, _, _, _, ini = h.run(ripples_ini(0, 10, 4, 3), START + steps + ["save"])
+        ini = ripples_putl(ini, key, value)  # stock ripples
+        _, queries, _, _, after = h.run(ini, ["load", "stat", "init", "stat", "save", "stat", "record", "preset"] +
+                                        [f"get {k}" for k in ROUND_KEYS])
+        got = gets(queries)
+        bad = {k: (got[k], v) for k, v in want.items() if got[k] != v}
+        rec = query(queries, "REC ")[0].split()
+        if bad:
+            fail(test, f"in effect (got, want): {bad}")
+        elif not stat_unchanged(queries) or after != ini:
+            fail(test, "setting.ini written at the start or by a save without a change")
+        elif (int(rec[1]), int(rec[2])) != (got["audio_source"], got["live_audio_volume"]):
+            fail(test, f"g_setting.record {rec} differs from the page's values")
+        else:
+            # the next change writes the values in effect: a third start reads the same (and so does ripples)
+            _, _, _, _, saved = h.run(after, START + ["set hdmi 6", "save"])
+            _, queries, _, _, _ = h.run(saved, START + [f"get {k}" for k in ROUND_KEYS])
+            again = gets(queries)
+            if any(again[k] != v for k, v in want.items()):
+                fail(test, f"after the next change and a restart: {again}, want {want}")
+            elif section(saved, "record").get(key) != str(value):
+                fail(test, f"[record] {key} changed by ripples-all: {section(saved, 'record')}")
+            else:
+                ok(test)
 
 
 def old_firmware(target, audio_source, live, mic_gain, linein_gain, flow):
@@ -747,6 +833,88 @@ TRANSITIONS = [
 ]
 
 
+# audio_mixer_build_held_commands(): the live paths the mixer connects, out (docs/audio.md)
+HELD_OFF = ["Left Output Mixer MIC1Booststage Switch", "Right Output Mixer MIC1Booststage Switch",
+            "Left Output Mixer MIC2Booststage Switch", "Right Output Mixer MIC2Booststage Switch",
+            "Left Output Mixer LINEINL Switch", "Right Output Mixer LINEINR Switch",
+            "Left Output Mixer DACL Switch", "Right Output Mixer DACR Switch",
+            "Left Output Mixer DACR Switch", "Right Output Mixer DACL Switch",
+            "LADC input Mixer l_output mixer Switch", "RADC input Mixer r_output mixer Switch",
+            "LADC input Mixer r_output mixer Switch", "RADC input Mixer l_output mixer Switch"]
+HELD_BATCH = [(name, 0) for name in HELD_OFF]
+
+
+def dvr_volume_lines(level):
+    """ripples' dvr_set_dvr_audio_volume(level) (dvr.c 4fbb865): line out, DAC and both AIF1 DAC timeslots"""
+    hw = [0, 26, 28, 29, 29, 30, 30, 31, 31][level]
+    dac = 0 if level == 0 else {4: 153, 6: 157, 7: 158}.get(level, (hw * 160 + 15) // 31)
+    return [f"codec lineout volume={hw}", f"codec DAC volume={dac}",
+            f"codec AIF1 DAC timeslot 0 volume={dac}", f"codec AIF1 DAC timeslot 1 volume={dac}"]
+
+
+# dvr_mute_live_audio(): audio_sel.sh out_linein_off, LINEIN output mixer gain 0
+DVR_MUTE = codec_lines(dict(SEL("out_linein_off"))) + ["codec LINEINL/R to L_R output mixer gain=0"]
+
+
+def test_hold(h):
+    """ripples' playback and tests while the mixer is held (review of phase 3, findings 1, 4, 5, 7)."""
+    # DVR playback with Mic and Line In heard (line out on) and Record Headphone Mix on: the held batch
+    # first, then media_init()'s libmedia_mpp reset and adec2ao_start(); only the file is heard
+    test = f"{h.target} hold: DVR playback with the page's headphone sources"
+    values = direct_only(rec_mic=1, rec_mix=1, mic=4, line_in=3, av=8, live_audio_volume=10, phones_at_boot=1)
+    lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "mark", "hold 1", "mark"]
+    lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + DVR_MUTE + dvr_volume_lines(5) + ["dump", "hold 0", "wait", "dump"]
+    batches, _, _, _, _ = h.run(mixer_ini(values), lines)
+    during, after = h.dumps[0], h.dumps[-1]
+    held = batches[h.marks[0]:h.marks[1]]
+    want = expected(clamp_values(values))
+    if held != [HELD_BATCH]:
+        fail(test, f"the first hold wrote {held}, want the held batch {HELD_BATCH}")
+    elif cm.heard(during, dac_active=True) != {"dac"}:
+        fail(test, f"heard with the file: {sorted(cm.heard(during, dac_active=True))}, want only the DAC")
+    elif cm.recorded_via_mix(during, dac_active=True):
+        fail(test, f"recorded through the output mixers while held: {sorted(cm.recorded_via_mix(during, dac_active=True))}")
+    elif cm.evaluate(after) != want:
+        fail(test, "after release:\n" + cm.describe(cm.evaluate(after)) + "\n want:\n" + cm.describe(want))
+    elif (after.get("AIF1 DAC timeslot 0 volume"), after.get("AIF1 DAC timeslot 1 volume")) != (160, 160):
+        fail(test, f"AIF1 DAC timeslot volumes after release {after.get('AIF1 DAC timeslot 0 volume')}, "
+                   f"{after.get('AIF1 DAC timeslot 1 volume')}, want 160, 160 (HDMI-in audio plays through timeslot 0)")
+    else:
+        ok(test)
+
+    # the Audio page's Mic test with Record Headphone Mix on (Line In and A/V In in the mix): ripples'
+    # routing (in_mic1, its gain, dvr_mute_live_audio) records the mic directly and nothing else
+    test = f"{h.target} hold: the Mic test records only the mic"
+    values = mix_only(mic=4, line_in=3, av=8, live_audio_volume=10)
+    lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "hold_test 1"]
+    lines += codec_lines(dict(SEL("in_mic1"))) + ["codec MIC1 boost AMP gain control=4"] + DVR_MUTE + ["dump", "hold_test 0", "wait", "dump"]
+    h.run(mixer_ini(values), lines)
+    rec = cm.evaluate(h.dumps[0])
+    routes = {s: r for side in ("record_l", "record_r") for s, r in rec[side].items()}
+    if set(routes) != {"mic"} or any(side is not None for _, side in routes["mic"]):
+        fail(test, f"recorded during the test: {cm.describe(rec)}")
+    elif cm.evaluate(h.dumps[-1]) != expected(clamp_values(values)):
+        fail(test, "after the test:\n" + cm.describe(cm.evaluate(h.dumps[-1])))
+    else:
+        ok(test)
+
+    # two holders: a test that ends while a DVR file plays does not end the player's hold
+    test = f"{h.target} hold: two holders"
+    values = direct_only(rec_mic=1, av=8, live_audio_volume=10)
+    lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "mark", "hold_test 1", "hold 1",
+                                                         "hold_test 0", "set mic 3", "apply"]
+    lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * (WATCH_FULL + 4)}", "mark", "hold 0", "mark", "dump"]
+    batches, _, _, _, _ = h.run(mixer_ini(values), lines)
+    during = batches[h.marks[0]:h.marks[1]]
+    on_release = h.marks[2] - h.marks[1]
+    if during != [HELD_BATCH] or on_release != 1:
+        fail(test, f"{len(during)} batches while either held (want only the held batch), {on_release} on the last release (want 1)")
+    elif cm.evaluate(h.dumps[-1]) != expected(clamp_values(dict(values, mic=3, phones_at_boot=1))):
+        fail(test, "after the last release:\n" + cm.describe(cm.evaluate(h.dumps[-1])))
+    else:
+        ok(test)
+
+
 def recorded_sources(state, dac):
     result = cm.evaluate(state, dac_active=dac)
     return set(result["record_l"]) | set(result["record_r"])
@@ -841,13 +1009,13 @@ def test_worker(h):
     lines += [f"sleep {WATCH_MS * (WATCH_FULL + 4)}", "mark", "hold 0", "mark", "dump",
               "codec lineout volume=27", f"sleep {WATCH_MS * 3}", "mark"]
     batches, queries, codec, _, _ = h.run(mixer_ini(direct_only(rec_av=1, av=8, live_audio_volume=10)), lines)
-    during = h.marks[1] - h.marks[0]
+    during = batches[h.marks[0]:h.marks[1]]
     on_release = h.marks[2] - h.marks[1]
     watched = h.marks[3] - h.marks[2]
     want = expected(clamp_values(direct_only(rec_av=1, av=8, mic=5, live_audio_volume=10)))
-    if during != 0 or on_release != 1 or watched != 1 or query(queries, "WAIT ")[-1] != "WAIT ok":
-        fail(test, f"{during} batches while held, {on_release} on release, {watched} for a reset afterwards "
-                   f"(want 0, 1, 1); {query(queries, 'WAIT ')}")
+    if during != [HELD_BATCH] or on_release != 1 or watched != 1 or query(queries, "WAIT ")[-1] != "WAIT ok":
+        fail(test, f"{len(during)} batches while held (want only the held batch), {on_release} on release, "
+                   f"{watched} for a reset afterwards (want 1, 1); {query(queries, 'WAIT ')}")
     elif cm.evaluate(h.dumps[-1]) != want:
         fail(test, "after release:\n" + cm.describe(cm.evaluate(h.dumps[-1])) + "\n want:\n" + cm.describe(want))
     else:
@@ -860,10 +1028,10 @@ def test_worker(h):
                                                          "set mic 5", "apply", f"sleep {WATCH_MS * 4}", "mark", "hold 0",
                                                          "mark", "dump"]
     batches, queries, codec, _, _ = h.run(mixer_ini(direct_only(rec_av=1, av=8, live_audio_volume=10)), lines)
-    during = h.marks[1] - h.marks[0]
+    during = batches[h.marks[0]:h.marks[1]]
     on_release = h.marks[2] - h.marks[1]
-    if during != 0 or on_release != 1:
-        fail(test, f"{during} batches while held, {on_release} on release (want 0, 1)")
+    if during != [HELD_BATCH] or on_release != 1:
+        fail(test, f"{len(during)} batches while held (want only the held batch), {on_release} on release (want 1)")
     elif cm.evaluate(h.dumps[-1]) != want:
         fail(test, "after release:\n" + cm.describe(cm.evaluate(h.dumps[-1])) + "\n want:\n" + cm.describe(want))
     else:
@@ -1073,7 +1241,7 @@ def main():
                 fail(target, f"build failed: {e}")
                 continue
             for test in (test_routing, test_loading, test_settings, test_migration, test_phones_at_boot,
-                         test_transitions, test_worker, test_watcher, test_daemon_restart):
+                         test_transitions, test_worker, test_hold, test_watcher, test_daemon_restart):
                 if args.only and args.only not in test.__name__:
                     continue
                 try:

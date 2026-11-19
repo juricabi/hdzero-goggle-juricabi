@@ -803,7 +803,7 @@ static void *page_audio_test_thread(void *arg) {
 
     // ripples' own codec code from here on; the mixer neither applies nor watches meanwhile, and
     // puts the page's state back afterwards (ripples restored its source and line out itself)
-    audio_mixer_hold(true);
+    audio_mixer_hold(AUDIO_MIXER_HOLD_TEST, true);
     active_test_mode = mode;
     switch (mode) {
     case AUDIO_TEST_MIC:
@@ -840,7 +840,7 @@ static void *page_audio_test_thread(void *arg) {
         break;
     }
     // the page's routing again: record sources, line out, the output mixers (DAC out of them)
-    audio_mixer_hold(false);
+    audio_mixer_hold(AUDIO_MIXER_HOLD_TEST, false);
 
     audio_test_phase = AUDIO_TEST_PHASE_IDLE;
     audio_test_running = false;

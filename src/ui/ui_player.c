@@ -364,7 +364,7 @@ void mplayer_file(char *fname) {
     load_stars(fname);
     init_mplayer();
     // ripples' playback code drives the codec (player/adec2ao.c: live audio muted, DVR Playback volume)
-    audio_mixer_hold(true);
+    audio_mixer_hold(AUDIO_MIXER_HOLD_PLAYBACK, true);
     media_init(fname);
     media_start();
     update_mplayer();
@@ -377,7 +377,7 @@ void mplayer_exit() {
         media = NULL;
     }
     // the mixer's state again (its media_init's AW_MPI_SYS_Init reset the mixer too)
-    audio_mixer_hold(false);
+    audio_mixer_hold(AUDIO_MIXER_HOLD_PLAYBACK, false);
     pthread_mutex_lock(&lvgl_mutex);
     free_mplayer();
 }
