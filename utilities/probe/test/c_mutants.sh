@@ -10,7 +10,7 @@
 # as a failure. Mutants marked EQUIV cannot change any outcome (the reason is given); they are run
 # and reported but do not count.
 #   utilities/probe/test/c_mutants.sh [name filter]     (~20 minutes; from the git worktree, or
-#   with BASE_SRC=<a tree of ripples 1.2.2 (4fbb865)> for the IT66121 / IT66021 tests)
+#   with BASE_SRC=<a tree of ripples 1.2.2 (3f0461f, tag ripples-v1.2.2)> for the IT66121 / IT66021 tests)
 # The tests only touch files of their own (stand-ins for sysfs, temporary directories); this
 # script needs no root and refuses none.
 set -u

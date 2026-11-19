@@ -9,13 +9,13 @@
 # inactive.) Checks: both block checksums, the CEA-861 extension structure (tag, revision,
 # data block collection ending exactly at the DTD offset, DTDs), and the audio claims;
 # with audio_in off the I2C sequence and the served EDID equal the base commit's.
-# Usage: sh utilities/probe/test/it66021_edid_test.sh [base-commit]   (default 4fbb865, ripples 1.2.2: the firmware this branch is built on)
+# Usage: sh utilities/probe/test/it66021_edid_test.sh [base-commit]   (default 3f0461f, ripples 1.2.2: the firmware this branch is built on)
 #   IT66021_SRC=<file>: check another it66021.c instead of the working tree's (SRC_TOP=<tree>:
 #   that tree's). The base file comes from git (this tree must be a git worktree that has
 #   the base commit) or from BASE_SRC=<a tree of the base commit>; without either: skipped
 #   (exit 77). The test programs run under a time limit (TEST_TIMEOUT, default 300 s).
 set -eu
-BASE=${1:-4fbb865}
+BASE=${1:-3f0461f}
 TL=${TEST_TIMEOUT:-300}
 TOP=$(cd "$(dirname "$0")/../../.." && pwd)
 SRC=${IT66021_SRC:-${SRC_TOP:-$TOP}/src/driver/it66021.c}

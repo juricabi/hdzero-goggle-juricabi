@@ -18,7 +18,7 @@ each script. Status of this branch: [docs/status.md](../../docs/status.md).
 The other suites run directly: `make -C utilities/module_bay_test test`, `utilities/module_bay_test/mutants.sh`,
 `python3 utilities/module_bay_test/check_strings.py`, the C tests of the HDMI audio code
 (`sh utilities/probe/test/it66121_seq_test.sh`, `it66021_edid_test.sh`, `pcmbridge_test.sh`, `hdmi_boot_test.sh`;
-the first two compare with ripples 1.2.2 (4fbb865) from git) and their mutants (`utilities/probe/test/c_mutants.sh`),
+the first two compare with ripples 1.2.2 (3f0461f, the release) from git) and their mutants (`utilities/probe/test/c_mutants.sh`),
 the audio mixer's host test, its mutants and the Audio page's strings (`python3 utilities/audio_mixer/test_mixer.py`,
 `mutants.py` (in parallel, `--jobs`), `check_strings.py`; docs/audio.md), and ripples' own tests (`make -C test/<area> run`,
 see docs/status.md for the list and how they are run here).

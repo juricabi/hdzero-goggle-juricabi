@@ -1,6 +1,6 @@
 #!/bin/sh
 # Host check of the IT66121 driver (src/driver/it66121.c) with stub I2C:
-#  - HDMI out audio not enabled: IT66121_init()/set_phase()/close() byte-for-byte as the base (ripples 1.2.2, 4fbb865);
+#  - HDMI out audio not enabled: IT66121_init()/set_phase()/close() byte-for-byte as the base (ripples 1.2.2, 3f0461f);
 #  - enabled: the audio register sequence, and Reg04 (which also holds the video, HDCP and
 #    RCLK resets) only ever written with the audio-reset bits changed: no write of the audio
 #    path can set a video reset bit, also when an I2C read fails (each read in turn), returns
@@ -13,9 +13,9 @@
 # The base files come from git (this tree must be a git worktree that has the base commit)
 # or from BASE_SRC=<a tree of the base commit>; without either the test is skipped (exit 77).
 # Every test program runs under a time limit (TEST_TIMEOUT, default 300 s).
-# Usage: sh utilities/probe/test/it66121_seq_test.sh [base-commit]   (default 4fbb865, ripples 1.2.2: the firmware this branch is built on)
+# Usage: sh utilities/probe/test/it66121_seq_test.sh [base-commit]   (default 3f0461f, ripples 1.2.2: the firmware this branch is built on)
 set -eu
-BASE=${1:-4fbb865}
+BASE=${1:-3f0461f}
 TL=${TEST_TIMEOUT:-300}
 TOP=$(cd "$(dirname "$0")/../../.." && pwd)
 SRC=${SRC_TOP:-$TOP}

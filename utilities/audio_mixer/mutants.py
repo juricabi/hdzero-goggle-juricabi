@@ -5,9 +5,10 @@
 
 Each mutant is one small change to a copy of src/core/audio_mixer*.c; test_mixer.py runs against
 the copy (--src). all's mutants (082b2f5) that still apply, the ones of all's reviews among them,
-and the ones of juricabi's own rules (ripples' controls, the presets, the settings both ways,
-hold), and the fixes of the review of phase 3 (the held batch, holders, the timeslot volumes, the round
-trip through stock ripples). Exit status 1 if a mutant survives (or the unmodified copy fails).
+and the ones of juricabi's own rules (ripples' controls, the settings both ways, hold), the fixes of
+the review of phase 3 (the held batch, holders, the timeslot volumes, the round trip through stock
+ripples), and juricabi.2's page (no linked rows, Record Level, the ADC keeping a source, the take-over
+of juricabi.1's Record Headphone Mix). Exit status 1 if a mutant survives (or the unmodified copy fails).
 """
 
 import concurrent.futures
@@ -31,21 +32,6 @@ MUTANTS = [
     ("review: AIF1 AD0L/R ADC switches off", R, [
         ('{"AIF1 AD0L Mixer ADCL Switch", 1}', '{"AIF1 AD0L Mixer ADCL Switch", 0}'),
         ('{"AIF1 AD0R Mixer ADCR Switch", 1}', '{"AIF1 AD0R Mixer ADCR Switch", 0}')]),
-    ("review: Record Headphone Mix inverted", R, [
-        ("const bool rec_mix = v[AUDIO_MIXER_REC_MIX] != 0;", "const bool rec_mix = v[AUDIO_MIXER_REC_MIX] == 0;")]),
-    ("mix + direct: a heard mic recorded twice", R, [
-        ("const int adc_mic = v[AUDIO_MIXER_REC_MIC] && !(rec_mix && mon_mic > 0);",
-         "const int adc_mic = v[AUDIO_MIXER_REC_MIC];")]),
-    ("mix + direct: direct a/v only without the mix (old Custom)", R, [
-        ("const int adc_av = v[AUDIO_MIXER_REC_AV] && !(rec_mix && mon_av > 0);",
-         "const int adc_av = !rec_mix && v[AUDIO_MIXER_REC_AV];")]),
-    ("mix + direct: line in left out whenever the mix is on", R, [
-        ("const int adc_line = v[AUDIO_MIXER_REC_LINE_IN] && !(rec_mix && mon_line > 0);",
-         "const int adc_line = v[AUDIO_MIXER_REC_LINE_IN] && !rec_mix;")]),
-    ("page marker: level 0 counted as in the mix", R, [
-        ("settings->value[AUDIO_MIXER_REC_MIX] && settings->value[level] > 0;",
-         "settings->value[AUDIO_MIXER_REC_MIX] && settings->value[level] + 1 > 0;")]),
-    ("migration: Record Headphone Mix on", R, [("v[AUDIO_MIXER_REC_MIX] = 0;", "v[AUDIO_MIXER_REC_MIX] = 1;")]),
     ("load: a version 1 [mixer] read as it is", M, [
         ("if (version < AUDIO_MIXER_VERSION) {", "if (version < 1) {")]),
     ("boot: headphones live from boot when untouched", M, [
@@ -97,7 +83,7 @@ MUTANTS = [
                                           "    if (0)\n        pthread_cond_signal(&work_cond);")]),
     ("no watcher", M, [("const int has = codec_has_last_batch(full);", "const int has = codec_has_last_batch(full) >= 0;")]),
     ("watcher: no backoff after the retries", M, [("#define AUDIO_MIXER_WATCH_RETRIES 3", "#define AUDIO_MIXER_WATCH_RETRIES 1000")]),
-    ("review x3: ADC volume never written", R, [('    cset(&cb, "ADC volume", DIGITAL_VOLUME_OLD);\n', "")]),
+    ("review x3: ADC volume never written", R, [('    cset(&cb, "ADC volume", adc_volume);\n', "")]),
     ("review x4: HDMI level is not a headphone level", M, [
         ("field == AUDIO_MIXER_AV || field == AUDIO_MIXER_HDMI;", "field == AUDIO_MIXER_AV;")]),
     ("review x5: unused output-mixer gains not reset to 0 dB", R, [
@@ -106,11 +92,9 @@ MUTANTS = [
         ("    mixer.value[field] = clamp_field(field, value);\n    if (is_headphone_level",
          "    mixer.value[field] = (uint8_t)value;\n    if (is_headphone_level")]),
     ("line out off: sources stay in the output mixers", R, [
-        ("const bool connect = line_out || rec_mix;", "const bool connect = true;")]),
+        ("const bool connect = line_out;", "const bool connect = true;")]),
     ("line out off: the DAC stays in the output mixers", R, [
         ("const int out_dac = connect && dac_on;", "const int out_dac = dac_on;")]),
-    ("line out off: the recorded mix loses its sources", R, [
-        ("const bool connect = line_out || rec_mix;", "const bool connect = line_out;")]),
     ("HDMI in: a level change switches the line out on", M, [
         ("        if (!line_out_by_source)\n            context.line_out = true;", "        context.line_out = true;")]),
     ("watcher: quick pass reads every control", M, [
@@ -136,35 +120,66 @@ MUTANTS = [
     ("Live Volume: line out without ripples' rounding", R, [("    return (v * 31 + 5) / 10;", "    return (v * 31) / 10;")]),
     ("Live Volume: A/V curve without its minimum", R, [("    if (v > 0 && gain == 0)\n        gain = 1;\n", "")]),
     ("Live Volume: A/V level one step off", R, [("    return gain + 1;\n}", "    return gain;\n}")]),
-    ("Live Volume slider leaves the A/V In level", M, [
-        ("    mixer.value[AUDIO_MIXER_AV] = audio_mixer_live_av_level(mixer.value[AUDIO_MIXER_LIVE_VOLUME]);\n", "")]),
-    ("Live Volume slider makes the headphones live from boot", M, [
-        ("    mixer.value[AUDIO_MIXER_AV] = audio_mixer_live_av_level(mixer.value[AUDIO_MIXER_LIVE_VOLUME]);\n",
-         "    mixer.value[AUDIO_MIXER_AV] = audio_mixer_live_av_level(mixer.value[AUDIO_MIXER_LIVE_VOLUME]);\n    mixer.value[AUDIO_MIXER_PHONES_AT_BOOT] = 1;\n    context.line_out = true;\n")]),
-    ("ADC gain: Line/AV Gain also with the mic alone", R, [
-        ("const int adc_gain = (rec_mix || adc_line || adc_av) ? v[AUDIO_MIXER_LINEIN_GAIN] : OUTPUT_GAIN_0DB;",
-         "const int adc_gain = v[AUDIO_MIXER_LINEIN_GAIN];")]),
-    ("ADC gain: 0 dB whatever is recorded", R, [
-        ("const int adc_gain = (rec_mix || adc_line || adc_av) ? v[AUDIO_MIXER_LINEIN_GAIN] : OUTPUT_GAIN_0DB;",
-         "const int adc_gain = OUTPUT_GAIN_0DB;")]),
-    ("ADC gain: the mix not counted", R, [
-        ("const int adc_gain = (rec_mix || adc_line || adc_av) ? v[AUDIO_MIXER_LINEIN_GAIN] : OUTPUT_GAIN_0DB;",
-         "const int adc_gain = (adc_line || adc_av) ? v[AUDIO_MIXER_LINEIN_GAIN] : OUTPUT_GAIN_0DB;")]),
     ("Mic Gain on the MIC2 preamp", R, [
         ('cset(&cb, "MIC1 boost AMP gain control", v[AUDIO_MIXER_MIC_GAIN]);', 'cset(&cb, "MIC1 boost AMP gain control", v[AUDIO_MIXER_LINEIN_GAIN]);')]),
     ("Line/AV Gain not on the MIC2 preamp", R, [
         ('cset(&cb, "MIC2 boost AMP gain control", v[AUDIO_MIXER_LINEIN_GAIN]);', 'cset(&cb, "MIC2 boost AMP gain control", 4);')]),
+    ("defaults: Record Level 0 dB with Line In / A/V In (not ripples' Line/AV Gain)", R, [
+        ("v[AUDIO_MIXER_REC_LEVEL] = dvr_source == 0 ? OUTPUT_GAIN_0DB : clamp(rec->linein_gain, AUDIO_MIXER_GAIN_MAX);",
+         "v[AUDIO_MIXER_REC_LEVEL] = OUTPUT_GAIN_0DB;")]),
+    ("defaults: Record Level Line/AV Gain with the mic too", R, [
+        ("v[AUDIO_MIXER_REC_LEVEL] = dvr_source == 0 ? OUTPUT_GAIN_0DB : clamp(rec->linein_gain, AUDIO_MIXER_GAIN_MAX);",
+         "v[AUDIO_MIXER_REC_LEVEL] = clamp(rec->linein_gain, AUDIO_MIXER_GAIN_MAX);")]),
     ("defaults: Mic Gain not ripples'", R, [
         ("v[AUDIO_MIXER_MIC_GAIN] = clamp(rec->mic_gain, AUDIO_MIXER_GAIN_MAX);", "v[AUDIO_MIXER_MIC_GAIN] = 4;")]),
 
-    # ---- the presets of ripples' rows
-    ("Audio Source: the other sources stay recorded", M, [
-        ("    mixer.value[AUDIO_MIXER_REC_MIC] = s == 0;\n    mixer.value[AUDIO_MIXER_REC_LINE_IN] = s == 1;\n    mixer.value[AUDIO_MIXER_REC_AV] = s == 2;\n",
-         "    mixer.value[AUDIO_MIXER_REC_MIC] |= s == 0;\n    mixer.value[AUDIO_MIXER_REC_LINE_IN] |= s == 1;\n    mixer.value[AUDIO_MIXER_REC_AV] |= s == 2;\n")]),
-    ("Audio Source: the receiver's audio not set", M, [("    mixer.value[AUDIO_MIXER_RX_AUDIO] = s == 2;\n", "")]),
-    ("Audio Source: marker ignores the other sources", M, [
-        ("    const bool preset = mixer.value[AUDIO_MIXER_REC_MIC] == (s == 0) && mixer.value[AUDIO_MIXER_REC_LINE_IN] == (s == 1) &&\n                        mixer.value[AUDIO_MIXER_REC_AV] == (s == 2);",
-         "    const bool preset = (s == 0 && mixer.value[AUDIO_MIXER_REC_MIC]) || (s == 1 && mixer.value[AUDIO_MIXER_REC_LINE_IN]) ||\n                        (s == 2 && mixer.value[AUDIO_MIXER_REC_AV]);")]),
+    # ---- juricabi.2's page: each row on its own
+    ("ADC gain: Line In Boost, not Record Level", R, [
+        ("const int adc_gain = v[AUDIO_MIXER_REC_LEVEL];", "const int adc_gain = v[AUDIO_MIXER_LINEIN_GAIN];")]),
+    ("ADC gain: 0 dB whatever Record Level says", R, [
+        ("const int adc_gain = v[AUDIO_MIXER_REC_LEVEL];", "const int adc_gain = OUTPUT_GAIN_0DB;")]),
+    ("nothing recorded: the ADC without a source", R, [("const int adc_mic = rec_mic || silent;", "const int adc_mic = rec_mic;")]),
+    ("nothing recorded: the mic recorded at full volume", R, [
+        ("const int adc_volume = silent ? ADC_VOLUME_SILENT : DIGITAL_VOLUME_OLD;", "const int adc_volume = DIGITAL_VOLUME_OLD;")]),
+    ("recorded: the ADC at its minimum volume", R, [
+        ("const int adc_volume = silent ? ADC_VOLUME_SILENT : DIGITAL_VOLUME_OLD;", "const int adc_volume = ADC_VOLUME_SILENT;")]),
+    ("a heard input is recorded through the output mixers", R, [
+        ('{"LADC input Mixer l_output mixer Switch", 0},', '{"LADC input Mixer l_output mixer Switch", out_mic > 0},')]),
+    ("a heard input is not recorded directly", R, [("const int adc_line = v[AUDIO_MIXER_REC_LINE_IN] != 0;",
+                                                     "const int adc_line = v[AUDIO_MIXER_REC_LINE_IN] != 0 && mon_line == 0;")]),
+    ("Headphone Volume moves A/V In again", M, [
+        ("    if (mixer.value[field] != old)\n        follow_locked(field);",
+         "    if (mixer.value[field] != old)\n        follow_locked(field);\n    if (field == AUDIO_MIXER_LIVE_VOLUME)\n"
+         "        mixer.value[AUDIO_MIXER_AV] = audio_mixer_live_av_level(mixer.value[AUDIO_MIXER_LIVE_VOLUME]);")]),
+    ("Audio Source does not follow the Record switches", M, [
+        ("        mixer.value[AUDIO_MIXER_SOURCE] = audio_mixer_source_of(&mixer);\n    if (field == AUDIO_MIXER_AV",
+         "        (void)0;\n    if (field == AUDIO_MIXER_AV")]),
+    ("Audio Source: the last recorded input, not the first", R, [
+        ("    for (int i = 0; i < 3; i++)\n        if (settings->value[rec[i]])", "    for (int i = 2; i >= 0; i--)\n        if (settings->value[rec[i]])")]),
+    ("Audio Source: moves away from a recorded current one", R, [
+        ("    if (settings->value[rec[current]])\n        return current;\n", "")]),
+    ("receiver audio does not follow A/V In", M, [
+        ("        mixer.value[AUDIO_MIXER_RX_AUDIO] = mixer.value[AUDIO_MIXER_AV] > 0 || mixer.value[AUDIO_MIXER_REC_AV];",
+         "        (void)0;")]),
+    ("receiver audio follows only the A/V In level", M, [
+        ("        mixer.value[AUDIO_MIXER_RX_AUDIO] = mixer.value[AUDIO_MIXER_AV] > 0 || mixer.value[AUDIO_MIXER_REC_AV];",
+         "        mixer.value[AUDIO_MIXER_RX_AUDIO] = mixer.value[AUDIO_MIXER_AV] > 0;")]),
+    ("juricabi.1: Record Headphone Mix ignored", M, [("        if (rec_mix > 0) {", "        if (rec_mix > 99) {")]),
+    ("juricabi.1: the mix records an input heard at level 0", M, [
+        ("                if (mixer.value[audio_mixer_level_of(f)] > 0 && !mixer.value[f]) {",
+         "                if (!mixer.value[f]) {")]),
+    ("juricabi.1: the taken-over switches not written with the next change", M, [
+        ("                    mixer.value[f] = 1;\n                    stale |= FIELD_BIT(f);", "                    mixer.value[f] = 1;")]),
+    ("juricabi.1: rec_mix left in setting.ini", M, [("        ini_puts(AUDIO_MIXER_SECTION, \"rec_mix\", NULL, SETTING_INI);\n", "")]),
+    ("juricabi.1: Record Level 0 dB whatever was recorded", M, [
+        ("            mixer.value[AUDIO_MIXER_REC_LEVEL] = more_than_mic ? clamp_field(AUDIO_MIXER_REC_LEVEL, rec->linein_gain) : 3;",
+         "            mixer.value[AUDIO_MIXER_REC_LEVEL] = 3;")]),
+    ("juricabi.1: Record Level ignores the mix", M, [
+        ("            const bool more_than_mic = rec_mix > 0 || mixer.value[AUDIO_MIXER_REC_LINE_IN] || mixer.value[AUDIO_MIXER_REC_AV];",
+         "            const bool more_than_mic = mixer.value[AUDIO_MIXER_REC_LINE_IN] || mixer.value[AUDIO_MIXER_REC_AV];")]),
+    ("Record Level read from setting.ini over a computed one", M, [
+        ("        if (!(in_file & FIELD_BIT(AUDIO_MIXER_REC_LEVEL))) {\n            const bool more_than_mic",
+         "        if (0) {\n            const bool more_than_mic")]),
 
     # ---- settings both ways
     ("ripples' values not handed back to g_setting", M, [("    rec->live_volume = mixer.value[AUDIO_MIXER_LIVE_VOLUME];\n", "")]),
@@ -177,14 +192,15 @@ MUTANTS = [
          "    const bool had_live = false;")]),
     ("all's firmware: Mic Gain not from its mic boost", M, [
         ("    if (!has_key(RECORD_SECTION, \"mic_gain\") && has_key(AUDIO_MIXER_SECTION, \"mic_boost\"))", "    if (0)")]),
-    ("all's firmware: Line/AV Gain from its Line In boost", M, [
-        ("ini_getl(AUDIO_MIXER_SECTION, \"dvr_level\", 3, SETTING_INI)", "ini_getl(AUDIO_MIXER_SECTION, \"line_in_boost\", 3, SETTING_INI)")]),
+    ("all's firmware: Line In Boost from its record level", M, [
+        ("ini_getl(AUDIO_MIXER_SECTION, \"line_in_boost\", 4, SETTING_INI)", "ini_getl(AUDIO_MIXER_SECTION, \"dvr_level\", 4, SETTING_INI)")]),
+    ("all's firmware: Record Level not from its record level", M, [
+        ("        if (!(in_file & FIELD_BIT(AUDIO_MIXER_REC_LEVEL)) && has_key(AUDIO_MIXER_SECTION, \"dvr_level\"))",
+         "        if (0)")]),
     ("all's firmware: DVR Playback not from its playback volume", M, [
         ("            rec->dvr_volume = dvr_volume_of_playback(", "            (void)dvr_volume_of_playback(")]),
     ("all's firmware: playback mapped to the nearest level below", M, [
         ("        if (line_out[level] >= playback)\n            return level;", "        if (line_out[level] > playback)\n            return level - 1;")]),
-    ("all's firmware: Audio Source not from its Record switches", M, [
-        ("        if (direct == 1 && file_basis_source == NO_KEY)\n", "        if (direct == 99 && file_basis_source == NO_KEY)\n")]),
     ("save: ripples' keys written without a change", M, [
         ("        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i))) {",
          "        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i)) || strcmp(field_ini[i].section, RECORD_SECTION) == 0) {")]),
@@ -201,8 +217,6 @@ MUTANTS = [
         ("            ini_putl(AUDIO_MIXER_SECTION, \"record_live\", file_basis_live, SETTING_INI);\n", "")]),
     ("round trip: values that follow ripples not written with the next change", M, [
         ("        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i))) {", "        if (current.value[i] != saved.value[i]) {")]),
-    ("this firmware's [mixer]: the Audio Source from the Record switches (all's rule)", M, [
-        ("        if (direct == 1 && file_basis_source == NO_KEY)\n", "        if (direct == 1)\n")]),
     ("save: a missing field that [record] would change not written", M, [
         ("            from_record.value[i] != current.value[i]) {", "            from_record.value[i] != current.value[i] && 0) {")]),
     ("save: [record] not brought in line with all's values", M, [
@@ -218,7 +232,7 @@ MUTANTS = [
         ('        "Left Output Mixer MIC1Booststage Switch", "Right Output Mixer MIC1Booststage Switch",\n', "")]),
     ("held batch: Line In stays in the output mixers", R, [
         ('        "Left Output Mixer MIC2Booststage Switch", "Right Output Mixer MIC2Booststage Switch",\n', "")]),
-    ("held batch: the recorded mix stays (a test records the headphone mix)", R, [
+    ("held batch: the output mixers stay on the ADC", R, [
         ('        "LADC input Mixer l_output mixer Switch",  "RADC input Mixer r_output mixer Switch",\n', "")]),
     ("hold: one release ends every holder's hold", M, [
         ("    held = hold ? (held | holder) : (held & ~(unsigned)holder);", "    held = hold ? (held | holder) : 0;")]),

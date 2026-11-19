@@ -4,7 +4,7 @@ The goggle can set the channel (and on some modules the mode) of an analog
 receiver module in the expansion module bay: dial, buttons, ELRS backpack. Menu:
 **Module Bay** (Goggle 1 and Goggle 2, the entry before Go Sleep!). It follows
 pkendall64's analog-module-control. This page describes it in juricabi's firmware: ripples'
-firmware 1.2.2 (LVTY-AI/hdzero-goggle 4fbb865) with the module bay ported from `all`.
+firmware 1.2.2 (LVTY-AI/hdzero-goggle, tag `ripples-v1.2.2`) with the module bay ported from `all`.
 
 **It needs a hardware mod, for every module type.** On a stock goggle no control
 signal reaches the analog module: the goggle only powers it. The mod is three

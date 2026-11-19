@@ -21,9 +21,9 @@ On all three the board wiring is unknown until the read-only probe has run on th
 same code is ported from `all` (082b2f5): the boot step and its record, the IT66121 Reg04 guard, the
 IT66021 EDID (merged with ripples' own EDID timings, whose checksum the 48 kHz-only EDID adjusts),
 the bridge in ripples' recorder, the shared `/tmp/.sunxi_dump.lock`, the BoxPro included, all off
-by default. The two switches are on the Audio page (ripples' page with the audio mixer's extras,
-docs/audio.md), and HDMI-in audio is a source of the audio mixer, as on `all`. The headphone
-volume is ripples' **Live Volume**, and ripples' **Line/AV Gain** is the level of the recording.
+by default. The two switches are on the Audio page (docs/audio.md), and HDMI-in audio is a source
+of the audio mixer, as on `all`: heard at the HDMI In level, never recorded (since juricabi.2). The
+headphone volume is **Headphone Volume**, the level of the recording **Record Level**.
 In phase 2 (docs/status.md) the keys were set by hand and HDMI-in audio went through ripples'
 `audio_sel.sh`; both are gone.
 
@@ -311,9 +311,7 @@ a failed start (one list of AI device users in `src/record/main.c`, checked in e
 start/stop/exit order by `utilities/live_audio_test/t_aidev.sh`).
 
 What HDMI out carries is the ADC capture, the same signal as the DVR and the WiFi stream:
-the Audio page's Recording section decides it (Record Headphone Mix, Record Mic / Line In /
-A/V In, Record Level; in juricabi's firmware ripples' Audio Source, the preset of the Record rows, and
-Line/AV Gain, the level), not the headphone volume.
+the Audio page's Record switches and Record Level decide it, not the headphone levels or volume.
 
 Flow: HDMI Out Audio On (`setting.ini [hdmi] audio_out=1`, stored by the Audio page) ->
 restart -> the boot step (4a) -> `hdmi_audio_load()` at app start reads the record
@@ -360,18 +358,18 @@ audio off for the rest of the boot ("audio path failed").
 ### HDMI-in audio as a mixer source: headphones and recording (HDMI In Audio = On)
 
 **In juricabi's firmware** as described here (the audio mixer, docs/audio.md). The line-out volume is
-ripples' Live Volume, the ADC input gain ripples' Line/AV Gain. DVR playback (ripples' own code,
-the mixer held meanwhile) takes the DAC for itself, and the mixer puts HDMI-in audio back
-afterwards.
+Headphone Volume. HDMI-in audio is heard only: since juricabi.2 the output mixers are never recorded
+(juricabi.1's Record Headphone Mix recorded them, and HDMI-in audio with them). DVR playback
+(ripples' own code, the mixer held meanwhile) takes the DAC for itself, and the mixer puts HDMI-in
+audio back afterwards.
 
 While HDMI in is shown, the bridge plays the I2S2 capture (`hw:snddaudio2`) into the
 internal codec's DAC (`plughw:audiocodec`, 48 kHz). From the DAC it enters the codec's
 output mixers like any analog source:
 
 ```
-I2S2 (IT66021) -> bridge -> AIF1 DA0 -> DAC -> L/R output mixer -+-> L+R sum -> lineout volume -> jack
-                                                                 +-> "l/r_output mixer" -> ADC -> MPP AI -> DVR, stream
-                                                                     (Record Headphone Mix)
+I2S2 (IT66021) -> bridge -> AIF1 DA0 -> DAC -> L/R output mixer --> L+R sum -> lineout volume -> jack
+                                                                 (the output mixers into the ADC: always off)
 ```
 
 `hdmi_audio_line_out()` in `src/core/hdmi_audio.c` is the one function that switches it,
@@ -379,10 +377,9 @@ and it only tells the audio mixer (`audio_mixer_set_live_dac()`, docs/audio.md "
 audio"); the mixer alone writes the codec's controls. On (the route starts): the DAC is a
 live source at the Audio page's **HDMI In** level (0.0 dB by default; the row is greyed
 out while HDMI In Audio is not in effect), mixed with the analog sources at their levels
-(mic + HDMI audio works), the line out stays on during HDMI in (Volume permitting), and
-**Record Headphone Mix** records it with the rest of the headphone mix. The direct Record switches
-cannot record it: there is no path from the DAC into the ADC except through the output
-mixer. Off (before the route stops; it waits until the codec has it, so the DAC leaves the
+(mic + HDMI audio works), and the line out stays on during HDMI in (Headphone Volume
+permitting). It is not recorded: there is no path from the DAC into the ADC except through the
+output mixers. Off (before the route stops; it waits until the codec has it, so the DAC leaves the
 mix before the bridge stops playing into it): HDMI in mutes the line out again, as stock.
 
 Before this was joined to the mixer, the HDMI code ran its own amixer commands (DAC
@@ -408,15 +405,13 @@ Coexistence and loops:
   the codec DAC) happens in the menu, where this route is off.
 
 Limits:
-* An analog round trip DAC -> output mixer -> ADC: some noise; the ADC input gain is shared
-  by all sources, and two loud sources mixed into the ADC can clip (nothing limits).
+* Two loud sources mixed in the output mixers can clip in the headphones (nothing limits).
 * Clock: I2S2 is clocked by the HDMI source, the codec by PLL_AUDIO. The bridge mutes until
   the incoming rate is seen to be 48 kHz (within 3 %) and mutes again if it is not; small
   drift is absorbed by dropping or repeating one frame per block (at most ~1400 ppm), an
   underrun is refilled with silence. Clicks at a correction are possible.
-* Recorded only through the output-mixer -> ADC switches (Record Headphone Mix). The WiFi
-  stream audio takes the same ADC capture as the DVR, so it carries it too; HDMI out is
-  off while HDMI in is shown anyway.
+* Not recorded, and so not in the WiFi stream audio either (the same ADC capture as the DVR);
+  HDMI out is off while HDMI in is shown anyway.
 
 Device test (HDMI In Audio On and one restart, and `RECORD.log` / `HDZGOGGLE.log` on the
 SD card):
@@ -424,10 +419,9 @@ SD card):
    the tone is heard at the HDMI In level; `RECORD.log` shows `HDMI in audio at 48000 Hz:
    unmuted` and every 10 s `bridge: N frames in (~48000/s) ...`. A 44.1 kHz source:
    `muted`, silence.
-2. Audio page: Record Headphone Mix Yes, Mic 0 dB. Start a DVR recording while the tone
-   plays, speak into the mic: the file has the tone and the mic (once). Record Headphone Mix
-   No: the file has only the direct Record sources, no tone. Leave HDMI in: line out goes
-   off; switch to analog: A/V on the jack as before, no tone.
+2. Audio page: Mic heard at 0 dB and recorded. Start a DVR recording while the tone plays,
+   speak into the mic: the headphones have the tone and the mic, the file the mic only. Leave
+   HDMI in: line out goes off; switch to analog: A/V on the jack as before, no tone.
 3. Storage page: repair or format the SD card while HDMI in plays: within ~10 s the
    `HDZGOGGLE.log` shows `record daemon restarted` and the tone is back.
 4. Long run (10 min): count clicks; `drift-adjusted` in the bridge log should grow slowly.

@@ -1,10 +1,10 @@
 # First flash: the order that risks least (juricabi's firmware; Goggle 1 first)
 
 This page is for flashing juricabi's firmware (ripples' firmware 1.2.2 with juricabi's additions, version
-`1.2.2-juricabi.1`, docs/status.md) onto an HDZero goggle for the first time, checking it, and going back to ripples' official
+`1.2.2-juricabi.2`, docs/status.md) onto an HDZero goggle for the first time, checking it, and going back to ripples' official
 1.2.2 if you want to. It is written for the original HDZero Goggle (Goggle 1); the notes marked **Goggle 2** and
-**BoxPro** say where those differ. **Nothing here has been tried on a real goggle**: the menu texts and the file
-handling below are read from ripples' code (`src/ui/page_version.c`, `mkapp/app/script/update_goggle.sh`,
+**BoxPro** say where those differ. juricabi.1 and ripples' 1.2.2 have been flashed this way on a Goggle 1, back and
+forth; the Goggle 2 and BoxPro notes are not tried. The menu texts and the file handling below are read from ripples' code (`src/ui/page_version.c`, `mkapp/app/script/update_goggle.sh`,
 `update_goggle2.sh`, `update_boxpro.sh`, `rc.sh`, `mkapp/mkapp_ota.sh`); where something could not be checked,
 the text says so. juricabi's firmware changes none of these files except `rc.sh` (one step, `hdmi_audio_boot`, which
 does nothing unless HDMI Out Audio was switched on: docs/hdmi-audio.md), so the flash path is ripples' own.
@@ -13,9 +13,9 @@ The images of this release (the repository's Releases page) are:
 
 | target | image |
 |---|---|
-| Goggle 1 | `HDZERO_GOGGLE-77-206-1.2.2-juricabi.1.bin` |
-| Goggle 2 | `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.1.bin` |
-| BoxPro | `HDZERO_BOXPRO-77-211-1.2.2-juricabi.1.bin` |
+| Goggle 1 | `HDZERO_GOGGLE-77-206-1.2.2-juricabi.2.bin` |
+| Goggle 2 | `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.2.bin` |
+| BoxPro | `HDZERO_BOXPRO-77-211-1.2.2-juricabi.2.bin` |
 
 each with a `.sha256` file next to it. (A build that is not at a git tag appends `-<commit>`.)
 
@@ -64,7 +64,7 @@ case. For this build's image, compare with the first 64 characters of its `.sha2
 the file name), or let PowerShell compare:
 
 ```
-(Get-FileHash .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.1.bin -Algorithm SHA256).Hash -eq (Get-Content .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.1.bin.sha256).Split(' ')[0]
+(Get-FileHash .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.2.bin -Algorithm SHA256).Hash -eq (Get-Content .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.2.bin.sha256).Split(' ')[0]
 ```
 
 It must print `True`. If a hash differs, download the file again; never flash a file whose hash does not match.
@@ -117,8 +117,8 @@ With one image on the card there is nothing to choose wrongly.
 5. When the script reports "all done", the goggle shows **"Update complete"**: "Goggle update completed
    successfully. Please repower goggle now.", beeps three times and ignores the buttons. Power off, wait 5 s,
    power on.
-6. Main menu > Firmware: Current Version now reads `app: juricabi.1 ripples 1.2.2 rx0: … rx1: … va: …` (the
-   version file of this build is `1.2.2-juricabi.1`; the row was looked at in the emulator, with that version
+6. Main menu > Firmware: Current Version now reads `app: juricabi.2 ripples 1.2.2 rx0: … rx1: … va: …` (the
+   version file of this build is `1.2.2-juricabi.2`; the row was looked at in the emulator, with that version
    file, on all three targets).
 7. Take the image off the card's root again, so that the Firmware page does not offer it later.
 
@@ -136,8 +136,10 @@ image twice (a primary and a secondary copy), so its first phase takes longer.
 Change no setting yet. Check each item against what the goggle did with ripples' 1.2.2:
 
 1. **HDZero video and OSD**: picture, OSD elements, channel.
-2. **DVR**: record 1 minute with your usual settings (Record Audio = Yes; the Audio Source is the one you had),
-   then play it back (Main menu > Playback): picture and sound as before.
+2. **DVR**: record 1 minute with your usual settings, then play it back (Main menu > Playback): picture and
+   sound as before (the input ripples' Audio Source recorded is recorded; DVR Audio is ripples' Record Audio).
+   Stop and start a recording a few times: each stop takes about as long as on ripples (`dvr_dbg.log` on the card,
+   `record_stop begin` to `record_close begin`, within a second).
 3. **Headphones at boot**: headphones on before you power on; as on ripples they are silent until the first
    switch to an analog source. Listen also right after the SD card check at boot (and after a card insertion, an
    SD repair or format): the record daemon's restart resets part of the codec, and this build sets it back within
@@ -147,7 +149,8 @@ Change no setting yet. Check each item against what the goggle did with ripples'
    leaves the bay pins alone and does not set a bay module's channel: set it on the module, as on ripples.
 5. **HDMI out**: the picture on a monitor.
 6. **WiFi**: as you use it; then switch it off again.
-7. **ELRS backpack**, if you use it: as before.
+7. **ELRS backpack**, if you use it: channel commands and DVR on arm. The DVR follows the arm also through a
+   menu and a channel switch, and Record Mode Auto no longer restarts after a disarm (docs/dvr.md, "Checks").
 8. **Standby and wake**: as you usually do.
 
 If something that worked with ripples' 1.2.2 does not work now, go back (section 9.1) and report what you saw.
@@ -155,19 +158,19 @@ If something that worked with ripples' 1.2.2 does not work now, go back (section
 ### What looks different from ripples 1.2.2
 
 * Main menu: a new **Module Bay** entry (Goggle 1 and 2; the BoxPro has no module bay).
-* Audio page: ripples' rows at the top as before, the extras below them (Headphones, Recording, Inputs on the
-  Goggle 2 / BoxPro, HDMI Audio (experimental)); the page scrolls. docs/audio.md.
+* Audio page: one row per input with its Headphones level and Record switch, then Levels, DVR and HDMI Audio
+  (experimental); the page scrolls. ripples' Audio Source and Live Volume rows are gone (their keys stay).
+  docs/audio.md.
 * WiFi Module > System: a new **Stream Audio** row (Off). docs/live-audio.md.
-* Firmware > Current Version shows `juricabi.1 ripples 1.2.2` (section 3).
+* Firmware > Current Version shows `juricabi.2 ripples 1.2.2` (section 3).
 * `setting.ini` is not changed at start-up; the first change on the Audio page adds a `[mixer]` section.
 
 ## 5. Then the Audio page
 
-Main menu > **Audio**. ripples' rows (Audio Source, the volumes and gains, the tests) work as on ripples. Then try
-the extras one at a time: the levels under Headphones (Mic; Line In if you use that jack; A/V In with an analog
-source), and the rows under Recording, each with a short recording played back. docs/audio.md explains every row
-and lists what to listen for ("Testing on a goggle"). Leave the two rows under "HDMI Audio (experimental)" Off
-until section 7.
+Main menu > **Audio**. Try the rows one at a time: the Headphones level of each input you use (Mic; Line In if
+you use that jack; A/V In with an analog source), then its Record switch, each with a short recording played back;
+then Record Level and the boosts. docs/audio.md explains every row and lists what to listen for ("Testing on a
+goggle"). Leave the two rows under "HDMI Audio (experimental)" Off until section 7.
 
 ## 6. Then Stream Audio
 
@@ -238,13 +241,13 @@ card's hidden partition. Which part of the system performs the emergency update,
 
 After going back, `setting.ini` keeps this build's `[mixer]`, `[module]` and `[hdmi]` sections and
 `[wifi] stream_audio`: ripples' firmware does not read them, so they do no harm. ripples reads its own `[record]`
-keys, which this build writes as its Audio page shows them (Audio Source, Live Volume, Mic Gain, Line/AV Gain,
-DVR Playback). Coming back to this build later, what ripples changed in `[record]` is taken over (docs/audio.md,
+keys, which this build writes as its Audio page shows them (Audio Source: the first recorded input; Live Volume:
+Headphone Volume; Mic Gain, Line/AV Gain: the boosts; DVR Playback). Coming back to this build later, what ripples changed in `[record]` is taken over (docs/audio.md,
 "Settings").
 
 ## What could not be checked here
 
-* The flash itself, every menu text on a real screen, and the timings: read from the code, never run on a goggle.
+* The flash on the Goggle 2 and BoxPro, and the timings: read from the code.
 * Whether the base firmware's `hdz_upgrade_app.sh` restores `setting.ini` from `/mnt/UDISK/`, and what the
   recovery keeps.
 * ripples' release page: the sizes and digests above are GitHub's for that release, as given to this project; the

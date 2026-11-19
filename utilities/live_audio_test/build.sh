@@ -9,9 +9,7 @@
 #   ring_test     both ring implementations in one binary (x86; ring_test.arm with TOOLCHAIN=<buildroot sdk>)
 #   record_host_fast  the same, stream audio stopped 300 ms (not 3 s) after the reader leaves
 #   stream_reader the real ring reader holding /tmp/live.pid: rtspLive's audio track without a server
-#   gmsg          sends goggle messages (record start/stop, AI->AO loop, HDMI audio bridge, quit)
-#   ctl_conf      juricabi: publishes a config snapshot and sends RECORD_CONFIG (or PAUSE, LIVE_STOP) like the
-#                 app's DVR control
+#   gmsg          sends goggle messages (record start/stop, live stop, AI->AO loop, HDMI audio bridge, quit)
 #
 # Every file is compiled with -Wall -Wextra; warnings are kept in $WORK/build/*.warn.
 set -e
@@ -46,10 +44,6 @@ RCF="-O1 -g $W -DAWCHIP=AW_V5 -D_GNU_SOURCE $REC_INC"
 for f in main avshare live_audio confparser gogglemsg rolling; do
     cc_warn "$R/$f.o" "src/record/$f.c" $RCF
 done
-# ripples' recorder: the DVR control queue and the DVR trace (lib/log), the real ones
-for f in record_control dvr_trace; do
-    cc_warn "$R/$f.o" "lib/log/src/$f.c" $RCF
-done
 gcc -O1 -g -Ilib/minIni/src -c lib/minIni/src/minIni.c -o "$R/minIni.o"
 cc_warn "$R/stubs.o" "$LAT_DIR/record_stubs.c" $RCF -I"$LAT_DIR"
 gcc -o "$BIN/record_host" "$R"/*.o -lpthread
@@ -76,10 +70,6 @@ fi
 
 # ---- mono (CLOCK_MONOTONIC, the clock of record_host's log: t_kill.sh) -----------------------
 gcc -O1 $W -o "$BIN/mono" "$LAT_DIR/mono.c"
-
-# ---- ctl_conf (ripples' record control queue, lib/log) ----------------------------------------
-gcc -O1 $W -Ilib/log/include -o "$BIN/ctl_conf" "$LAT_DIR/ctl_conf.c" lib/log/src/record_control.c
-echo "built $BIN/ctl_conf"
 
 # ---- rtspLive (native) ----------------------------------------------------------------------
 if [ -n "$LIVE555" ]; then

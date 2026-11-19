@@ -10,11 +10,10 @@ they share `record`, `rtspLive`, the record conf and the WiFi page.
 **In juricabi's firmware** (ripples' firmware 1.2.2 with this project's additions, docs/status.md): ported
 from `all` (082b2f5). `rtspLive` and the ring are `all`'s code (ripples had upstream's, but for
 its flush in the writer's `avshare_reset()`, kept for the video side of the ring; since phase 4 the
-audio side is left to the stream audio's writer, docs/status.md). ripples reworked the recorder
-(`src/record/main.c`: the DVR control queue, rolling recordings), and the stream's hooks are
-merged into it: `live_run()` (after ripples' pause check), the AI device's users
-(`aidev_heldByOthers()`), `vvLive_onFrame()`'s clock, the stream's conf. The input is
-whatever the Audio page records (ripples' Audio Source with the mixer's Record rows, docs/audio.md).
+audio side is left to the stream audio's writer, docs/status.md). The stream's hooks are in
+ripples' recorder (`src/record/main.c`, with ripples' rolling recordings): `live_run()`, the AI
+device's users (`aidev_heldByOthers()`), `vvLive_onFrame()`'s clock, the stream's conf. The input is
+whatever the Audio page records (its Record switches, docs/audio.md).
 
 ## 1. The live path (as found, before this change)
 
@@ -61,9 +60,8 @@ running, and never with Record Audio off**. Nothing feeds the audio side of the 
 `avshare_addAudio()` (record) and `avshare_readAudio()` (rtspLive) are unused leftovers
 (`addAudio` expects TS PES fragments; `readAudio` computes `tv_usec = ts*100/9` without a modulo).
 Input routing is not touched by this work: the stream carries whatever the codec's ADC captures
-on AI device 0, which is what the DVR records: the Audio page's recording rows (docs/audio.md: in
-juricabi's firmware ripples' Audio Source, the preset of Record Mic / Line In / A/V In, Record Headphone
-Mix and Line/AV Gain, the level). The headphone volume does not change it.
+on AI device 0, which is what the DVR records: the Audio page's Record switches and Record Level
+(docs/audio.md). The headphone levels and volume do not change it.
 
 ### The shared ring (`src/record/avshare.c` writer, `src/rtspLive/stream/avshare.c` reader)
 
@@ -126,13 +124,10 @@ file), `ADTSAudioStreamDiscreteFramer` (*adds* ADTS headers).
   is (re)started.
 - `[live] audio` is read by rtspLive at start (`conf_loadLiveParams()`) and by `record` when the
   audio reader connects (`conf_loadLiveAudio()`). Shipped `record.conf` has `audio=0`.
-- In juricabi's firmware the recorder normally runs on ripples' DVR config snapshots: the app copies
-  `record.conf` once when it starts (`src/core/dvr.c`) and hands the recorder edited copies with
-  its own `[vi]`, `[venc]` and `[record]` keys. A Stream Audio change after that, or a hand edit of
-  `[live]`, would never be in a snapshot, so the stream's audio reads its conf (`[live]`, `[ai]`,
-  `[aenc]`, which the snapshots never change) from the file the recorder chose at its start
-  (`liveConfFile` in `src/record/main.c`: the app's `record.conf`, the file the WiFi page writes
-  and rtspLive reads). `t_snapshot.sh` checks it in both directions.
+- The stream's audio reads its conf (`[live]`, `[ai]`, `[aenc]`) from the file the recorder chose at its
+  start (`liveConfFile` in `src/record/main.c`: the app's `record.conf`, the file the WiFi page writes
+  and rtspLive reads). (Written for ripples' newer recorder, which ran on config snapshots of the app;
+  ripples 1.2.2, the base since juricabi.2, has none, and the file is the same one.)
 - `[live] audio_offset_ms` (shipped `0`, -500..500): added to the stream's audio timestamps,
   positive delays the audio. Only needed if the video pts clock turns out not to be
   CLOCK_MONOTONIC on a goggle (see "Timestamps" and 4.). Read at each start of the audio chain.
@@ -144,14 +139,13 @@ file), `ADTSAudioStreamDiscreteFramer` (*adds* ADTS headers).
   ADTS, `[ai]`/`[aenc]` conf) starts, independent of recording and of Record Audio. It stops 3 s
   after the reader goes away (DESCRIBE and SETUP each connect, the delay avoids a restart in
   between); a failed start is retried after 5 s; a running chain that produces no frame for 2 s
-  is stopped and started again. In juricabi's firmware the poll comes after ripples' pause check:
-  while the recorder is paused around a source switch the chain is neither started nor stopped
-  (it runs on; ripples' `avshare_reset()` then flushes the video side of the ring for the new
-  video bitstream, and leaves the audio side to the stream audio's writer: no audio frame is
-  lost, `t_pause.sh`).
+  is stopped and started again. At a source switch the app stops the live encoding (ripples'
+  `REC_STOP_LIVE`, `LIVE_cmdSTOP`): the recorder stops the live video encoder and ripples'
+  `avshare_reset()` flushes the video side of the ring for the new video bitstream; the audio chain
+  runs on and its side of the ring is left to its writer: no audio frame is lost (`t_pause.sh`).
 - The chain captures from the same `[ai] device` as recording: the stream carries what the DVR
-  records (the Audio page's recording rows). HDMI-in audio is in it only with HDMI In Audio and
-  Record Headphone Mix on (docs/hdmi-audio.md).
+  records (the Audio page's Record switches). HDMI-in audio is never in it (heard only,
+  docs/audio.md).
 - Users of the AI device: recording with audio, the AI -> AO loop, the stream audio and the HDMI
   out audio bridge (`pcmbridge.c`, route `src=ai`) can run at the same time (channels on one
   device). `aidev_heldByOthers(recCtx, self)` in `main.c` answers whether a user other than
@@ -203,7 +197,7 @@ presentation times.
   subsession switches to `LiveNalVideoSource` + `Live{H264,H265}VideoStreamDiscreteFramer`. With
   `audio=0` the server builds exactly the session it built before (same classes, same source;
   SDP and packets checked identical to 8364a43, see 3.; 8364a43 has the same rtspLive code as
-  the base a85841d, and ripples 4fbb865 has it unchanged too).
+  the base a85841d, and ripples 1.2.2 has it unchanged too).
 - Audio: `LiveAudioSource` reads one frame at a time (`avshare_readMediaFrame()`), checks and strips
   the ADTS header, delivers the raw AAC access unit with presentation time = ring timestamp
   converted to wall clock (`avshare_timestampToTimeval()`: one process-wide CLOCK_MONOTONIC ->
@@ -268,7 +262,7 @@ presentation times.
 | On, recording with audio / AI->AO loop at the same time | all run; start/stop of one does not stop the others or disable the device under them |
 | Client paused / slow | ring holds ~1.2 s of audio, then drops new frames; reader skips frames older than 1 s |
 | rtspLive killed / crashed | record stops the live video encoder within ~0.5 s and the audio chain 3 s later |
-| juricabi: a source switch while streaming (the recorder paused, then resumed) | live video stops and comes back; the audio runs on (no frame lost: no pts gap over 1.5 AAC frames, 32 ms) |
+| juricabi: a source switch while streaming (the live encoding stopped) | live video stops and comes back; the audio runs on (no frame lost: no pts gap over 1.5 AAC frames, 32 ms) |
 | Several clients | one shared source per track (`reuseFirstSource`), the ring has one reader per media |
 
 ## 3. Tests on the build host
@@ -304,8 +298,7 @@ libx265, python3, qemu-arm). The programs use the goggle's fixed paths and IPC k
 | `t_cpu.sh` (host) | rtspLive with audio 1375 -> 1066 wake-ups/s, 3.8 -> 3.0 % CPU; audio off 970..994 |
 | `t_off_identical.sh` | Stream Audio off: SDP (but `o=`) and RTP packets (marker, size, payload header, timestamp steps) identical to the 8364a43 rtspLive, H.264 and H.265 |
 | `t_arm.sh` | the shipped ARM rtspLive (live555 2022.12.01) under qemu-arm: `t_e2e.sh` 38/38, `t_describe.sh` 12/12 (2.82 s / 2.51 s / overlap +2.51 s / 0.57 s with audio), `t_kill.sh` 15/15 |
-| `t_snapshot.sh` (juricabi) | `ctl_conf` publishes a config snapshot and sends `RECORD_CONFIG` like the app's DVR control; then Stream Audio changes in the recorder's start file: snapshot `audio=0` + Stream Audio On -> SDP with audio, the chain starts, frames reach the ring; snapshot `audio=1` + Stream Audio Off -> video-only SDP, "audio is off", no chain. 9/9; without the fix 2/9 (the recorder followed the snapshot) |
-| `t_pause.sh` (juricabi) | while a client streams with audio, `ctl_conf` pauses the recorder (`RECORD_PAUSE`, as the app does before a source switch: live video stops, `avshare_reset()` flushes the video side of the ring) and resumes it 2 s later (`RECORD_LIVE_STOP` with a snapshot): the audio chain keeps running, no audio frame is lost (no pts gap over 32 ms, 1.5 AAC frames of 21.3 ms) and the audio stays in order, video is back after the resume. 7/7 |
+| `t_pause.sh` (juricabi) | while a client streams with audio, `gmsg` stops the live encoding (`LIVE_cmdSTOP`, as the app does at a source switch: live video stops, `avshare_reset()` flushes the video side of the ring; the recorder starts it again for the client): the audio chain keeps running, no audio frame is lost (no pts gap over 32 ms, 1.5 AAC frames of 21.3 ms) and the audio stays in order, video is back. |
 
 Not testable without a goggle: the MPP AI/AENC chain itself (two or three AI channels at once,
 its real ADTS output and timestamps, chunk sizes, capture jitter), the VI pts clock, the
@@ -340,7 +333,7 @@ Allwinner encoder's NAL layout, the camera-to-goggle latency, memory ordering on
       then logs to it (`mkapp/app/script/rc.sh`).
    2. On a PC: `WORK=/tmp/lat utilities/live_audio_test/gen_media.sh`, then play
       `/tmp/lat/media/source_ref.mkv` full screen in front of the HDZero camera (`mpv --fs`), the
-      PC's audio output into the goggle's line in (no acoustic delay), Audio Source Line In.
+      PC's audio output into the goggle's line in (no acoustic delay), Line In Record Yes, the others No.
       The file itself has its beeps 21.3 ms after the flashes (AAC encoder delay):
       `python3 utilities/live_audio_test/avsync.py /tmp/lat/media/source_ref.mkv` prints it.
    3. With the PC on the goggle's WiFi: `ffmpeg -rtsp_transport tcp -i rtsp://192.168.2.122:8554/hdzero -t 40 -c copy -f nut cap.nut`

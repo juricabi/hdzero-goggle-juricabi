@@ -1,25 +1,33 @@
 # juricabi's HDZero goggle firmware
 
 juricabi's firmware is built on [ripples' Custom HDZero Goggles Firmware](https://github.com/LVTY-AI/hdzero-goggle)
-1.2.2, with the additions below: version `1.2.2-juricabi.1` = ripples' 1.2.2 plus juricabi's changes, number 1.
-It is **not** an official ripples or HDZero release, and ripples' testing of 1.2.2 does not cover these
-additions. Goggle 1, Goggle 2 and BoxPro.
+1.2.2 (the release, tag `ripples-v1.2.2`), with the additions below: version `1.2.2-juricabi.2` = ripples' 1.2.2
+plus juricabi's changes, number 2. It is **not** an official ripples or HDZero release, and ripples' testing of
+1.2.2 does not cover these additions. Goggle 1, Goggle 2 and BoxPro.
 
-**Status: pre-release, never run on a real goggle.** It passed its host tests, the emulator on all three targets
-and an independent review ([docs/status.md](docs/status.md)). Flash it only if you can go back
-([docs/first-flash.md](docs/first-flash.md)).
+**Status: pre-release.** It passed its host tests and the emulator on all three targets. juricabi.1 ran on a
+Goggle 1; juricabi.2 addresses what that showed and is being tried on that goggle now
+([docs/status.md](docs/status.md)). Flash it only if you can go back ([docs/first-flash.md](docs/first-flash.md)).
 
 ## What it adds to ripples 1.2.2
 
+* **Audio page: each input heard and recorded on its own row.** Mic, Line In, A/V In and HDMI In each have a
+  headphone level and (but HDMI In) a Record Yes / No, next to each other; nothing changes another row. Then
+  Headphone Volume, Record Level, Mic Boost, Line In Boost, DVR Audio, DVR Playback and ripples' tests.
+  [docs/audio.md](docs/audio.md)
+* **Automatic DVR that keeps the backpack's word**: armed on the radio, it records whenever the video is shown,
+  also after a menu, a channel or a source switch; disarmed, Record Mode Auto does not start a new recording;
+  the DVR button wins. [docs/dvr.md](docs/dvr.md)
 * **Module bay control**: tune an analog module in the bay from the goggle (Switch, rapidFIRE, SteadyView,
-  SteadyView X). Needs the 3-wire bay mod; with Module = None (the default) the goggle leaves the bay pins alone.
+  SteadyView X), also from the radio's channel commands. Needs the 3-wire bay mod; with Module = None (the
+  default) the goggle leaves the bay pins alone.
   [docs/module-bay.md](docs/module-bay.md), [docs/module-bay-mod-safety.md](docs/module-bay-mod-safety.md)
 * **Stream Audio**: the recorded sound as an AAC track of the WiFi live stream (off by default).
   [docs/live-audio.md](docs/live-audio.md)
 * **HDMI Out / HDMI In audio** (experimental, off): HDMI Out Audio stays locked until the read-only probe gives
   this board a GO. [docs/hdmi-audio.md](docs/hdmi-audio.md), [utilities/probe/README.md](utilities/probe/README.md)
-* **Audio page extras** below ripples' own rows: a headphone level per source, what is recorded (each source,
-  the headphone mix), the built-in receiver's audio. [docs/audio.md](docs/audio.md)
+* **ripples' security fix of 2 November** (after 1.2.2): firmware updates only from the SD card, not from files
+  the WiFi page fetched without a check.
 
 ## Safety first
 
@@ -32,12 +40,12 @@ and an independent review ([docs/status.md](docs/status.md)). Flash it only if y
 ## Flash, go back, build
 
 * **Images**: on this repository's Releases page, one per goggle, each with its `.sha256`:
-  `HDZERO_GOGGLE-77-206-1.2.2-juricabi.1.bin`, `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.1.bin`,
-  `HDZERO_BOXPRO-77-211-1.2.2-juricabi.1.bin`. The Firmware page shows the version as `juricabi.1 ripples 1.2.2`.
+  `HDZERO_GOGGLE-77-206-1.2.2-juricabi.2.bin`, `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.2.bin`,
+  `HDZERO_BOXPRO-77-211-1.2.2-juricabi.2.bin`. The Firmware page shows the version as `juricabi.2 ripples 1.2.2`.
 * **Flash and go back**: [docs/first-flash.md](docs/first-flash.md): what to keep before you flash (ripples'
   official 1.2.2 and the HDZero recovery package), the SD card, the flash from the menu, the checks in their order
-  (the untouched goggle, the Audio page, Stream Audio, the probe and HDMI audio only on a GO, then the module bay),
-  and the way back to ripples' 1.2.2.
+  (the untouched goggle, the Audio page, the DVR, Stream Audio, the probe and HDMI audio only on a GO, then the
+  module bay), and the way back to ripples' 1.2.2.
 * **Build**: as in ripples' README below (`setup.sh`, then `make` in `build_goggle`, `build_goggle2` or
   `build_boxpro`), or all three images at once on Linux with `utilities/dev/build_all.sh <worktree> goggle
   goggle2 boxpro` ([utilities/dev/README.md](utilities/dev/README.md)). A build at a git tag names the images by
@@ -47,16 +55,16 @@ and an independent review ([docs/status.md](docs/status.md)). Flash it only if y
 ## Credits and licence
 
 * **ripples** ([LVTY-AI/hdzero-goggle](https://github.com/LVTY-AI/hdzero-goggle)): the firmware this is built on;
-  its code is kept as the branch `upstream` of this repository.
+  its 1.2.2 release is kept as the branch `upstream` of this repository.
 * **The HDZero Goggle Project** ([hd-zero/hdzero-goggle](https://github.com/hd-zero/hdzero-goggle)): the original
   firmware, MIT licence ([LICENSE](LICENSE)), under which juricabi's changes are as well.
-* **pkendall64**: the analog module control the module bay support follows (his
-  [wiki](https://github.com/pkendall64/hdzero-goggle/wiki/Analog-Module-Backpack-Control) and
+* **pkendall64**: the analog module control the module bay support follows (the
+  [wiki](https://github.com/pkendall64/hdzero-goggle/wiki/Analog-Module-Backpack-Control) and the
   analog-module-control code).
 * **live555** (`lib/live`, used by the live stream server as upstream; LGPL) and the other libraries under `lib/`
   under their own licences.
-* ITE's public IT6602/IT66021 driver and ITE's data sheets in `docs/` (already in the original firmware's repository): read for the HDMI audio work
-  (docs/hdmi-audio.md lists the sources).
+* ITE's public IT6602/IT66021 driver and ITE's data sheets in `docs/` (already in the original firmware's
+  repository): read for the HDMI audio work (docs/hdmi-audio.md lists the sources).
 
 ripples' donation link in the README below supports ripples' work, not juricabi's firmware.
 

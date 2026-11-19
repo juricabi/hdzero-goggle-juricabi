@@ -9,12 +9,15 @@ the driver's DAPM routes).
 For every target (Goggle, Goggle 2, BoxPro):
   routing     a matrix of mixer states: which sources reach the recording (left, right) and
               the headphones, through which gains; every batch line a real control in range,
-              never a digital DAC/ADC loopback; HDMI-in audio (the live DAC) included; Record
-              Headphone Mix and the direct Record switches together, never a source twice;
-              ripples' controls (Live Volume = line out, Mic Gain / Line/AV Gain = preamps, Line/AV
-              Gain = ADC input gain unless only the mic is recorded)
+              never a digital DAC/ADC loopback; HDMI-in audio (the live DAC) heard, never recorded;
+              juricabi.2's page: each input's headphone level and Record switch on their own, the
+              output mixers never recorded, Record Level the ADC input gain, Headphone Volume the
+              line out, the boosts the preamps; with nothing recorded the mic stays on the ADC at
+              the minimum ADC volume (the ADC keeps a source)
   loading     clamping, fields missing from [mixer], a [mixer] of all's test build (version 1);
-              the presets of ripples' rows (Audio Source, Live Volume); the first change
+              nothing links two rows (Headphone Volume leaves A/V In); ripples' Audio Source and
+              the receiver's audio follow the Record switches and A/V In; the first change;
+              a [mixer] of juricabi.1 (Record Headphone Mix)
   settings    compatibility both ways (docs/audio.md): a setting.ini of stock ripples 1.2.2, one of
               all's firmware (082b2f5), a fresh one: the values in effect, nothing written at
               start-up, nothing written by a save without a change, all's keys kept for all; the
@@ -33,8 +36,8 @@ For every target (Goggle, Goggle 2, BoxPro):
   watcher     a libmedia_mpp reset after the routing is undone; the cost of a pass; a control the
               codec does not keep, a codec that cannot be read, an amixer that fails: retried
               with a backoff, never a loop, never given up; recheck looks at once; not while held
-  daemon restart  while the line out is off (stock boot state, HDMI in, Live Volume 0) a record
-              daemon restart makes nothing audible that the recording of the mix does not need
+  daemon restart  while the line out is off (stock boot state, HDMI in, Headphone Volume 0) a
+              record daemon restart makes nothing audible
 --src runs the same against other mixer sources (mutants.py); --driver also checks that every
 modelled route is one of the driver's.
 """
@@ -54,11 +57,11 @@ sys.dont_write_bytecode = True
 import codec_model as cm  # noqa: E402
 
 TARGETS = ["HDZGOGGLE", "HDZGOGGLE2", "HDZBOXPRO"]
-MIXER_KEYS = ["mic", "line_in", "av", "hdmi", "rec_mix", "rec_mic", "rec_line_in", "rec_av", "rx_audio", "phones_at_boot"]
+MIXER_KEYS = ["mic", "line_in", "av", "hdmi", "rec_mic", "rec_line_in", "rec_av", "rx_audio", "phones_at_boot", "rec_level"]
 RECORD_KEYS = ["live_audio_volume", "mic_gain", "linein_gain", "audio_source"]  # ripples' [record] keys
 KEYS = MIXER_KEYS + RECORD_KEYS
-MAX = {"mic": 8, "line_in": 8, "av": 8, "hdmi": 8, "rec_mix": 1, "rec_mic": 1, "rec_line_in": 1, "rec_av": 1,
-       "rx_audio": 1, "phones_at_boot": 1, "live_audio_volume": 10, "mic_gain": 7, "linein_gain": 7, "audio_source": 2}
+MAX = {"mic": 8, "line_in": 8, "av": 8, "hdmi": 8, "rec_mic": 1, "rec_line_in": 1, "rec_av": 1, "rx_audio": 1,
+       "phones_at_boot": 1, "rec_level": 7, "live_audio_volume": 10, "mic_gain": 7, "linein_gain": 7, "audio_source": 2}
 # all's [mixer] keys that juricabi's firmware does not use (ripples' controls instead): kept in setting.ini
 ALL_ONLY_KEYS = ["headphones", "playback", "mic_boost", "line_in_boost", "dvr_level"]
 VERSION = "2"
@@ -97,7 +100,7 @@ def ok(test):
 
 
 # ---------------------------------------------------------------------------------------------
-# ripples' curves (dvr.c / audio_sel.sh of ripples 4fbb865), independent of audio_mixer_routing.c
+# ripples' curves (dvr.c / audio_sel.sh of ripples 1.2.2), independent of audio_mixer_routing.c
 
 def live_line_out(v):
     v = max(0, min(10, v))
@@ -263,17 +266,16 @@ def expected(v, line_out=True, live_dac=False):
             g = frozenset(gains | {("lineout volume", volume)})
             phones[source] = {(g, "L"), (g, "R")}
 
-    direct_on = {s: v[k] and not (v["rec_mix"] and s in mix) for s, k in DIRECT.items()}
-    # ripples' Line/AV Gain is the ADC input gain unless the mic alone is recorded (then 0 dB)
-    adc_gain = v["linein_gain"] if (v["rec_mix"] or direct_on["line_in"] or direct_on["av"]) else 3
-    adc = {("ADC input gain control", adc_gain), ("ADC volume", 160)}
+    direct_on = {s: bool(v[k]) for s, k in DIRECT.items()}
+    # nothing to record: the mic stays on the ADC (the ADC keeps a source), at the minimum ADC volume
+    silent = not any(direct_on.values())
+    if silent:
+        direct_on["mic"] = True
+    # Record Level is the ADC input gain
+    adc = {("ADC input gain control", v["rec_level"]), ("ADC volume", 0 if silent else 160)}
     record_l, record_r = {}, {}
-    if v["rec_mix"]:  # Record Headphone Mix: left ADC <- left output mixer, right ADC <- right
-        for source, gains in mix.items():
-            record_l[source] = {(frozenset(gains | adc), "L")}
-            record_r[source] = {(frozenset(gains | adc), "R")}
-    # Record Mic / Line In / A/V In: straight into both ADCs, only the preamp in front; a source
-    # that is in the recorded mix is recorded once, at its mix level
+    # Record Mic / Line In / A/V In: straight into both ADCs, only the preamp in front; the output
+    # mixers (the headphones) are never recorded
     direct = {"mic": {("MIC1 boost AMP gain control", v["mic_gain"])},
               "line_in": {("MIC2 boost AMP gain control", v["linein_gain"])},
               "av": set()}
@@ -288,8 +290,10 @@ def migration_spec(audio_source, live=10, mic_gain=4, linein_gain=3):
     """The mixer's values for ripples' [record] state (no [mixer] of version 2)."""
     sel = min(audio_source & 0xFF, 2)
     return {"mic": 0, "line_in": 0, "av": live_linein_gain(live) + 1, "hdmi": 4,
-            "rec_mix": 0, "rec_mic": int(sel == 0), "rec_line_in": int(sel == 1), "rec_av": int(sel == 2),
+            "rec_mic": int(sel == 0), "rec_line_in": int(sel == 1), "rec_av": int(sel == 2),
             "rx_audio": int(audio_source == 2), "phones_at_boot": 0,
+            # ripples' ADC input gain: Line/AV Gain with Line In / A/V In, the record daemon's 0 dB with the mic
+            "rec_level": 3 if sel == 0 else linein_gain,
             "live_audio_volume": max(0, min(10, live)), "mic_gain": mic_gain, "linein_gain": linein_gain,
             "audio_source": sel}
 
@@ -315,47 +319,32 @@ def check_batches(test, batches):
 # ---------------------------------------------------------------------------------------------
 # tests
 
-def mix_only(**values):  # Record Headphone Mix, no direct source
-    return dict({"rec_mix": 1, "rec_mic": 0, "rec_line_in": 0, "rec_av": 0}, **values)
-
-
-def direct_only(**values):  # the stock path: direct sources only
-    return dict({"rec_mix": 0, "rec_mic": 0, "rec_line_in": 0, "rec_av": 0}, **values)
+def direct_only(**values):  # the Record switches as given, the others off
+    return dict({"rec_mic": 0, "rec_line_in": 0, "rec_av": 0}, **values)
 
 
 ROUTING_STATES = [
-    ("mix: mic + av", mix_only(mic=4, av=3, mic_gain=2, live_audio_volume=8, linein_gain=3), {}),
-    ("mix: line in + av", mix_only(line_in=6, linein_gain=2, av=4, live_audio_volume=10), {}),
-    ("mix, live volume 0 still records", mix_only(mic=8, live_audio_volume=0, linein_gain=2, mic_gain=4), {}),
-    ("direct mic, hear a/v (ripples' Mic)", direct_only(rec_mic=1, av=8, mic_gain=5, live_audio_volume=10, linein_gain=6), {}),
-    ("direct line in (ripples' Line In)", direct_only(rec_line_in=1, av=8, linein_gain=5, live_audio_volume=7), {}),
-    ("direct a/v (ripples' A/V In)", direct_only(rec_av=1, av=5, linein_gain=1, live_audio_volume=4), {}),
-    ("direct line in + a/v, hear mic", direct_only(rec_line_in=1, rec_av=1, mic=2, linein_gain=6, live_audio_volume=4), {}),
-    ("direct mic + line in: Line/AV Gain on the ADC", direct_only(rec_mic=1, rec_line_in=1, mic_gain=2, linein_gain=6), {}),
-    ("nothing recorded", direct_only(av=8, live_audio_volume=10, linein_gain=5), {}),
-    ("all max, mix", mix_only(mic=8, line_in=8, av=8, mic_gain=7, linein_gain=7, live_audio_volume=10), {}),
+    ("mic recorded, a/v heard (ripples' Mic)", direct_only(rec_mic=1, av=8, mic_gain=5, live_audio_volume=10, linein_gain=6), {}),
+    ("line in recorded (ripples' Line In)", direct_only(rec_line_in=1, av=8, linein_gain=5, rec_level=5, live_audio_volume=7), {}),
+    ("a/v recorded (ripples' A/V In)", direct_only(rec_av=1, av=5, rec_level=1, live_audio_volume=4), {}),
+    ("line in + a/v recorded, mic heard", direct_only(rec_line_in=1, rec_av=1, mic=2, linein_gain=6, rec_level=6, live_audio_volume=4), {}),
+    ("mic + line in recorded, own Record Level", direct_only(rec_mic=1, rec_line_in=1, mic_gain=2, linein_gain=6, rec_level=2), {}),
+    ("all three recorded and heard", direct_only(rec_mic=1, rec_line_in=1, rec_av=1, mic=8, line_in=8, av=8, mic_gain=7,
+                                                linein_gain=7, rec_level=7, live_audio_volume=10), {}),
+    ("recorded, not heard", direct_only(rec_mic=1, rec_av=1, mic=0, av=0, live_audio_volume=10), {}),
+    ("nothing recorded: the mic on the ADC, silent", direct_only(av=8, mic=3, live_audio_volume=10, linein_gain=5, rec_level=4), {}),
     ("all off", direct_only(live_audio_volume=0, av=0), {}),
-    # Record Headphone Mix together with direct sources
-    ("mix + direct mic at level 0: mic direct, a/v from the mix", mix_only(rec_mic=1, mic=0, av=8, live_audio_volume=10), {}),
-    ("mix + direct mic at level > 0: once, at its mix level", mix_only(rec_mic=1, mic=5, av=8, mic_gain=3, live_audio_volume=10), {}),
-    ("mix + all direct, some heard", mix_only(rec_mic=1, rec_line_in=1, rec_av=1, mic=0, line_in=2, av=7, linein_gain=4), {}),
-    ("mix + direct line in at level 0", mix_only(rec_line_in=1, line_in=0, linein_gain=5, mic=3), {}),
-    ("mix of nothing + direct a/v", mix_only(rec_av=1, mic=0, line_in=0, av=0, live_audio_volume=10), {}),
-    ("hdmi in (line out off), mix", mix_only(mic=4, av=8, live_audio_volume=10, linein_gain=3), {"line_out": 0}),
-    ("hdmi in (line out off), direct line in", direct_only(rec_line_in=1, av=8, live_audio_volume=10), {"line_out": 0}),
+    ("hdmi in (line out off), line in recorded", direct_only(rec_line_in=1, av=8, live_audio_volume=10), {"line_out": 0}),
+    ("hdmi in (line out off), nothing recorded", direct_only(mic=4, av=8, live_audio_volume=10), {"line_out": 0}),
     ("out of range in setting.ini", {"mic": 99, "line_in": -3, "av": 12, "mic_gain": 8, "linein_gain": 100,
-                                     "live_audio_volume": 200, "rec_mix": 5, "rec_mic": 7, "rec_line_in": 2,
+                                     "live_audio_volume": 200, "rec_mic": 7, "rec_line_in": 2, "rec_level": 12,
                                      "rec_av": -1, "rx_audio": 3, "hdmi": 11}, {}),
-    # HDMI In Audio on: the bridge plays HDMI-in audio into the DAC (live_dac); mixed with the mic,
-    # line out on despite HDMI in, recorded only with Record Headphone Mix
-    ("hdmi in audio, mix, with mic", mix_only(mic=4, av=0, hdmi=6, live_audio_volume=8, linein_gain=3),
-     {"line_out": 0, "live_dac": 1}),
-    ("hdmi in audio, direct mic: hdmi not recorded", direct_only(rec_mic=1, mic=4, hdmi=1, live_audio_volume=10),
-     {"line_out": 0, "live_dac": 1}),
-    ("hdmi in audio + direct mic at level > 0, mix", mix_only(rec_mic=1, mic=3, hdmi=4, live_audio_volume=10),
-     {"line_out": 0, "live_dac": 1}),
-    ("hdmi in audio at level 0, hdmi in", mix_only(mic=4, hdmi=0, live_audio_volume=10), {"line_out": 0, "live_dac": 1}),
-    ("hdmi in audio off (stock): line out off", mix_only(mic=4, hdmi=8, av=8, live_audio_volume=10), {"line_out": 0, "live_dac": 0}),
+    # HDMI In Audio on: the bridge plays HDMI-in audio into the DAC (live_dac); mixed with the mic, line out
+    # on despite HDMI in, never recorded
+    ("hdmi in audio, mic recorded and heard", direct_only(rec_mic=1, mic=4, hdmi=6, live_audio_volume=8), {"line_out": 0, "live_dac": 1}),
+    ("hdmi in audio, nothing recorded", direct_only(hdmi=4, live_audio_volume=10), {"line_out": 0, "live_dac": 1}),
+    ("hdmi in audio at level 0, hdmi in", direct_only(rec_mic=1, mic=4, hdmi=0, live_audio_volume=10), {"line_out": 0, "live_dac": 1}),
+    ("hdmi in audio off (stock): line out off", direct_only(rec_av=1, mic=4, hdmi=8, av=8, live_audio_volume=10), {"line_out": 0, "live_dac": 0}),
 ]
 
 # Every control the mixer owns, at a value it never writes: a batch must set each of them.
@@ -449,35 +438,26 @@ def test_loading(h):
             else:
                 ok(test)
 
-    # the page's "in the mix" marker: Record Headphone Mix on and the source's level above 0
-    for values, want in ((mix_only(mic=3, line_in=0, av=8), {"rec_mic": 1, "rec_line_in": 0, "rec_av": 1}),
-                         (direct_only(rec_mic=1, mic=3, av=8), {"rec_mic": 0, "rec_line_in": 0, "rec_av": 0})):
-        _, queries, _, _, _ = h.run(mixer_ini(values), START + [f"inmix {k}" for k in DIRECT.values()])
-        got = {q.split()[1]: int(q.split()[2]) for q in query(queries, "INMIX ")}
-        if got != want:
-            fail(f"{h.target} in recorded mix", f"{values}: got {got}, want {want}")
-        else:
-            ok(f"{h.target} in recorded mix")
-
-    # ripples' Audio Source and Live Volume rows: presets (and the marker of the Audio Source row)
-    test = f"{h.target} Audio Source preset"
-    lines = START + ["set rec_mix 1", "set_source 1", "preset"] + [f"get {k}" for k in KEYS]
-    lines += ["set rec_mic 1", "preset", "set_source 2", "preset", "rx", "set rx_audio 0", "rx", "set_source 0", "rx"]
-    _, queries, _, _, _ = h.run(QUIET + "[record]\naudio_source=2\n", lines)
-    got = gets(queries)
-    presets = [int(q.split()[1]) for q in query(queries, "PRESET ")]
+    # nothing on the page links two rows; ripples' Audio Source (no row: the first recorded input, for
+    # ripples' firmware) and the receiver's audio (A/V In heard or recorded) follow
+    test = f"{h.target} Audio Source and receiver audio follow the Record switches and A/V In"
+    lines = START + ["set rec_mic 0", "set rec_av 1", "get audio_source", "rx", "set av 0", "rx", "set rec_av 0", "rx",
+                     "get audio_source", "set rec_line_in 1", "get audio_source", "set rec_mic 1", "get audio_source",
+                     "get mic", "get av", "get live_audio_volume"]
+    _, queries, _, _, _ = h.run(QUIET + "[record]\naudio_source=0\n", lines)
+    sources = [int(q.split()[2]) for q in query(queries, "GET audio_source")]
     rx = [int(q.split()[1]) for q in query(queries, "RX ")]
-    want = dict(migration_spec(1), rec_mix=1)
-    if got != want or presets != [1, 0, 1] or rx != [1, 0, 0]:
-        fail(test, f"got {got} (want {want}), preset {presets} (want [1, 0, 1]), receiver audio {rx} (want [1, 0, 0])")
+    others = {q.split()[1]: int(q.split()[2]) for q in query(queries, "GET ") if q.split()[1] != "audio_source"}
+    if sources != [2, 2, 1, 1] or rx != [1, 1, 0] or others != {"mic": 0, "av": 0, "live_audio_volume": 10}:
+        fail(test, f"audio_source {sources} (want [2, 2, 1, 1]), receiver audio {rx} (want [1, 1, 0]), {others}")
     else:
         ok(test)
-    test = f"{h.target} Live Volume moves the A/V In level (ripples' curve), not the headphones at boot"
+    test = f"{h.target} Headphone Volume leaves the A/V In level and the headphones at boot"
     bad = []
     for live in range(0, 11):
         _, queries, _, _, _ = h.run("", START + [f"set_live {live}", "get av", "get live_audio_volume", "get phones_at_boot"])
         got = gets(queries)
-        if got != {"av": live_linein_gain(live) + 1, "live_audio_volume": live, "phones_at_boot": 0}:
+        if got != {"av": live_linein_gain(10) + 1, "live_audio_volume": live, "phones_at_boot": 0}:
             bad.append(f"{live}: {got}")
     if bad:
         fail(test, "; ".join(bad))
@@ -559,33 +539,36 @@ def test_settings(h):
         ("defaults of all's migration (A/V In)",
          dict(mic=0, line_in=0, av=8, hdmi=4, rec_mix=0, rec_mic=0, rec_line_in=0, rec_av=1, rx_audio=1, phones_at_boot=0,
               headphones=31, playback=27, mic_boost=4, line_in_boost=4, dvr_level=3), 2,
-         {"live_audio_volume": 10, "mic_gain": 4, "linein_gain": 3, "audio_source": 2}, 2),
+         {"rec_level": 3, "live_audio_volume": 10, "mic_gain": 4, "linein_gain": 4, "audio_source": 2}, 2),
+        # Record Headphone Mix (rec_mix=1): the inputs it heard (mic, a/v) are recorded directly
         ("used: mix, mic heard, line in recorded", dict(mic=5, line_in=0, av=6, hdmi=7, rec_mix=1, rec_mic=0, rec_line_in=1,
                                                       rec_av=0, rx_audio=0, phones_at_boot=1, headphones=16, playback=31,
                                                       mic_boost=6, line_in_boost=2, dvr_level=5), 0,
-         {"live_audio_volume": 5, "mic_gain": 6, "linein_gain": 5, "audio_source": 1}, 7),
-        ("several direct sources (Audio Source as stored)", dict(mic=0, line_in=0, av=8, hdmi=4, rec_mix=0, rec_mic=1,
-                                                               rec_line_in=0, rec_av=1, rx_audio=1, phones_at_boot=0,
-                                                               headphones=0, playback=0, mic_boost=0, line_in_boost=7,
-                                                               dvr_level=7), 1,
-         {"live_audio_volume": 0, "mic_gain": 0, "linein_gain": 7, "audio_source": 1}, 0),
+         {"rec_mic": 1, "rec_av": 1, "rec_level": 5, "live_audio_volume": 5, "mic_gain": 6, "linein_gain": 2,
+          "audio_source": 0}, 7),
+        # ripples' Audio Source: the stored one is not recorded, the first recorded input (the mic) instead
+        ("several direct sources (Audio Source: the first recorded)", dict(mic=0, line_in=0, av=8, hdmi=4, rec_mix=0, rec_mic=1,
+                                                                         rec_line_in=0, rec_av=1, rx_audio=1, phones_at_boot=0,
+                                                                         headphones=0, playback=0, mic_boost=0, line_in_boost=7,
+                                                                         dvr_level=7), 1,
+         {"rec_level": 7, "live_audio_volume": 0, "mic_gain": 0, "linein_gain": 7, "audio_source": 0}, 0),
         # all's headphones 0..31 to Live Volume 0..10, rounded: 27 -> 8.7 -> 9
         ("headphones between two Live Volumes", dict(mic=0, line_in=0, av=8, hdmi=4, rec_mix=0, rec_mic=0, rec_line_in=0,
                                                     rec_av=1, rx_audio=1, phones_at_boot=0, headphones=27, playback=27,
                                                     mic_boost=4, line_in_boost=4, dvr_level=3), 2,
-         {"live_audio_volume": 9, "mic_gain": 4, "linein_gain": 3, "audio_source": 2}, 2),
+         {"rec_level": 3, "live_audio_volume": 9, "mic_gain": 4, "linein_gain": 4, "audio_source": 2}, 2),
         # ripples' firmware before all's: ripples' own Live Volume is kept, not all's headphones
         ("ripples' Live Volume from before all's", dict(mic=0, line_in=0, av=8, hdmi=4, rec_mix=0, rec_mic=0, rec_line_in=0,
                                                        rec_av=1, rx_audio=1, phones_at_boot=0, headphones=27, playback=27,
                                                        mic_boost=4, line_in_boost=4, dvr_level=3), 2,
-         {"live_audio_volume": 4, "mic_gain": 4, "linein_gain": 3, "audio_source": 2}, 2, "live_audio_volume=4\n"),
+         {"rec_level": 3, "live_audio_volume": 4, "mic_gain": 4, "linein_gain": 4, "audio_source": 2}, 2, "live_audio_volume=4\n"),
     )
     for name, mixer, audio_source, want_ripples, want_dvr, *record in cases:
         test = f"{h.target} settings: all's firmware, {name}"
         ini = all_ini(mixer, audio_source, record[0] if record else "")
         _, queries, _, _, after = h.run(ini, ["load", "stat", "init", "save", "stat", "record"] + [f"get {k}" for k in KEYS])
         got = gets(queries)
-        want = dict({k: mixer[k] for k in MIXER_KEYS}, **want_ripples)
+        want = dict({k: mixer[k] for k in MIXER_KEYS if k in mixer}, **want_ripples)
         rec = query(queries, "REC ")
         want_rec = (f"REC {want_ripples['audio_source']} {want_ripples['live_audio_volume']} {want_dvr} "
                     f"{want_ripples['mic_gain']} {want_ripples['linein_gain']}")
@@ -605,9 +588,10 @@ def test_settings(h):
         # ... and the next start shows what the page showed (the Audio Source as well)
         _, queries, _, _, _ = h.run(after, START + [f"get {k}" for k in KEYS])
         again = gets(queries)
-        # (a headphone level changed: the headphones from boot on)
-        want_again = dict(want, live_audio_volume=8, hdmi=2, av=live_linein_gain(8) + 1, phones_at_boot=1)
-        if lost or kept.get("version") != VERSION or "live_audio_volume=8" not in after or kept.get("hdmi") != "2":
+        # (a headphone level changed: the headphones from boot on; Headphone Volume leaves A/V In)
+        want_again = dict(want, live_audio_volume=8, hdmi=2, phones_at_boot=1)
+        if lost or kept.get("version") != VERSION or "live_audio_volume=8" not in after or kept.get("hdmi") != "2" \
+                or "rec_mix" in kept:
             fail(test, f"after a change: all's keys changed or lost {lost}, [mixer] {kept}")
         elif again != want_again:
             fail(test, f"after a change and a restart: {again}, want {want_again}")
@@ -616,8 +600,8 @@ def test_settings(h):
 
     # back to stock ripples after juricabi's firmware changed its rows: ripples reads its own keys as written
     test = f"{h.target} settings: back to stock ripples"
-    _, _, _, _, after = h.run(ripples_ini(0, 10, 4, 3), START + ["set_source 2", "set_live 6", "set mic_gain 2", "set linein_gain 6",
-                                                                "set rec_mix 1", "save"])
+    _, _, _, _, after = h.run(ripples_ini(0, 10, 4, 3), START + ["set rec_mic 0", "set rec_av 1", "set_live 6", "set mic_gain 2",
+                                                                "set linein_gain 6", "save"])
     _, queries, _, _, _ = h.run(after, ["load", "record"])  # stock ripples: settings.c only
     if query(queries, "REC ") != ["REC 2 6 8 2 6"]:
         fail(test, f"stock ripples would read {query(queries, 'REC ')}, want REC 2 6 8 2 6")
@@ -625,6 +609,47 @@ def test_settings(h):
         ok(test)
 
     test_round_trip(h)
+    test_juricabi1(h)
+
+
+def test_juricabi1(h):
+    """A [mixer] of juricabi.1 with Record Headphone Mix (rec_mix=1): each input it heard is recorded directly,
+    the Record Level is what the ADC had (Line/AV Gain, more than the mic recorded); nothing written at the start
+    or by a save without a change; the next change writes the Record switches and Record Level and removes
+    rec_mix; a [mixer] of juricabi.1 without the mix keeps its Record switches, Record Level from its rule."""
+    test = f"{h.target} settings: juricabi.1, Record Headphone Mix"
+    ini = (QUIET + "[record]\naudio_source=0\nlinein_gain=5\n[mixer]\nmic=4\nline_in=0\nav=6\nrec_mix=1\nrec_mic=0\n"
+           "rec_line_in=0\nrec_av=0\nrecord_source=0\nrecord_live=10\nversion=2\n")
+    _, queries, _, _, after = h.run(ini, ["load", "stat", "init", "save", "stat"] + [f"get {k}" for k in KEYS])
+    got = gets(queries)
+    want = {"rec_mic": 1, "rec_line_in": 0, "rec_av": 1, "rec_level": 5, "mic": 4, "av": 6, "audio_source": 0}
+    bad = {k: (got[k], v) for k, v in want.items() if got[k] != v}
+    if bad:
+        fail(test, f"in effect (got, want): {bad}")
+    elif not stat_unchanged(queries) or after != ini:
+        fail(test, "setting.ini written at the start or by a save without a change")
+    else:
+        _, _, _, _, saved = h.run(ini, START + ["set hdmi 5", "save"])
+        mixer = section(saved, "mixer")
+        _, queries, _, _, _ = h.run(saved, START + [f"get {k}" for k in KEYS])
+        again = gets(queries)
+        if "rec_mix" in mixer or mixer.get("rec_mic") != "1" or mixer.get("rec_av") != "1" or mixer.get("rec_level") != "5":
+            fail(test, f"after the next change [mixer] is {mixer}")
+        elif any(again[k] != v for k, v in want.items()):
+            fail(test, f"after the next change and a restart: {again}")
+        else:
+            ok(test)
+    test = f"{h.target} settings: juricabi.1, Record switches without the mix"
+    for rec, want_level in (("rec_mic=1\nrec_line_in=0\nrec_av=0\n", 3), ("rec_mic=0\nrec_line_in=0\nrec_av=1\n", 5)):
+        ini = (QUIET + "[record]\naudio_source=0\nlinein_gain=5\n[mixer]\nmic=4\nrec_mix=0\n" + rec +
+               "record_source=0\nrecord_live=10\nversion=2\n")
+        _, queries, _, _, _ = h.run(ini, START + ["get rec_level", "get rec_mic", "get rec_av"])
+        got = gets(queries)
+        if got["rec_level"] != want_level:
+            fail(test, f"{rec!r}: Record Level {got['rec_level']}, want {want_level}")
+            break
+    else:
+        ok(test)
 
 
 def ripples_putl(text, key, value):
@@ -646,7 +671,7 @@ def section_text(text, name):
     return split_section(text, name)[1]
 
 
-ROUND_KEYS = ["rec_mic", "rec_line_in", "rec_av", "rx_audio", "av", "audio_source", "live_audio_volume"]
+ROUND_KEYS = ["rec_mic", "rec_line_in", "rec_av", "rx_audio", "rec_level", "av", "audio_source", "live_audio_volume"]
 
 
 def test_round_trip(h):
@@ -655,26 +680,26 @@ def test_round_trip(h):
     is written at the start; the next change writes them; what ripples did not change stays."""
     cases = (
         # name, juricabi steps, the [record] edit of stock ripples, values in effect afterwards
-        ("Audio Source Line In, then ripples Mic", ["set_source 1"], ("audio_source", 0),
-         dict(rec_mic=1, rec_line_in=0, rec_av=0, rx_audio=0, audio_source=0)),
-        ("Audio Source Line In, then ripples A/V In", ["set_source 1"], ("audio_source", 2),
-         dict(rec_mic=0, rec_line_in=0, rec_av=1, rx_audio=1, audio_source=2)),
-        ("Live Volume 3, then ripples 10", ["set_live 3"], ("live_audio_volume", 10),
+        ("Record Line In only, then ripples Mic", ["set rec_mic 0", "set rec_line_in 1"], ("audio_source", 0),
+         dict(rec_mic=1, rec_line_in=0, rec_av=0, rx_audio=0, rec_level=3, audio_source=0)),
+        ("Record Line In only, then ripples A/V In", ["set rec_mic 0", "set rec_line_in 1"], ("audio_source", 2),
+         dict(rec_mic=0, rec_line_in=0, rec_av=1, rx_audio=1, rec_level=3, audio_source=2)),
+        ("Headphone Volume 3, then ripples 10", ["set_live 3"], ("live_audio_volume", 10),
          dict(av=live_linein_gain(10) + 1, live_audio_volume=10)),
-        ("Live Volume 3 and a trimmed A/V In, then ripples 7", ["set_live 3", "set av 6"], ("live_audio_volume", 7),
+        ("Headphone Volume 3 and a trimmed A/V In, then ripples 7", ["set_live 3", "set av 6"], ("live_audio_volume", 7),
          dict(av=live_linein_gain(7) + 1, live_audio_volume=7)),
-        # not changed by ripples: the page's own Record switches stay, and so does its Audio Source
-        ("own Record switches (Line In only, Audio Source Mic), ripples wrote the same Audio Source",
-         ["set rec_mic 0", "set rec_line_in 1"], ("audio_source", 0),
-         dict(rec_mic=0, rec_line_in=1, rec_av=0, rx_audio=0, audio_source=0)),
-        ("own Record switches, ripples wrote the same Audio Source", ["set_source 1", "set rec_mic 1", "set av 5"],
-         ("audio_source", 1), dict(rec_mic=1, rec_line_in=1, rec_av=0, rx_audio=0, av=5, audio_source=1)),
+        # not changed by ripples: the page's own Record switches stay, and so does ripples' Audio Source
+        ("own Record switches (Line In + A/V In), ripples wrote the same Audio Source",
+         ["set rec_mic 0", "set rec_line_in 1", "set rec_av 1"], ("audio_source", 1),
+         dict(rec_mic=0, rec_line_in=1, rec_av=1, rx_audio=1, audio_source=1)),
+        ("own Record switches and a level, ripples wrote the same Audio Source", ["set rec_av 1", "set av 5"],
+         ("audio_source", 0), dict(rec_mic=1, rec_line_in=0, rec_av=1, rx_audio=1, av=5, audio_source=0)),
     )
     for name, steps, (key, value), want in cases:
         test = f"{h.target} settings: round trip, {name}"
         _, _, _, _, ini = h.run(ripples_ini(0, 10, 4, 3), START + steps + ["save"])
         ini = ripples_putl(ini, key, value)  # stock ripples
-        _, queries, _, _, after = h.run(ini, ["load", "stat", "init", "stat", "save", "stat", "record", "preset"] +
+        _, queries, _, _, after = h.run(ini, ["load", "stat", "init", "stat", "save", "stat", "record"] +
                                         [f"get {k}" for k in ROUND_KEYS])
         got = gets(queries)
         bad = {k: (got[k], v) for k, v in want.items() if got[k] != v}
@@ -699,7 +724,7 @@ def test_round_trip(h):
 
 
 def old_firmware(target, audio_source, live, mic_gain, linein_gain, flow):
-    """Codec state and receiver audio of stock ripples (record daemon up, then the app): dvr.c 4fbb865."""
+    """Codec state and receiver audio of stock ripples (record daemon up, then the app): dvr.c of 1.2.2."""
     state = base_codec(target)
     sel = min(audio_source & 0xFF, 2)
 
@@ -774,8 +799,8 @@ def test_phones_at_boot(h):
     values = dict(migration_spec(2))
     for name, ini_values, change, want_live, want_flag in (
             ("untouched", values, [], False, 0),
-            ("a recording switch changed", values, ["set rec_mix 1", "apply"], False, 0),
-            ("Live Volume changed (ripples' slider)", values, ["set_live 6", "apply"], False, 0),
+            ("a Record switch changed", values, ["set rec_line_in 1", "apply"], False, 0),
+            ("Headphone Volume changed", values, ["set_live 6", "apply"], False, 0),
             ("Mic Gain changed", values, ["set mic_gain 6", "apply"], False, 0),
             ("Mic changed", values, ["set mic 3", "apply"], True, 1),
             ("A/V In changed", values, ["set av 5", "apply"], True, 1),
@@ -798,37 +823,35 @@ def test_phones_at_boot(h):
 
 TRANSITIONS = [
     # name, start values, start context, change (set lines / context), dac active during the batch
-    ("switch the only source (mic -> a/v)", mix_only(mic=4, live_audio_volume=10), [],
+    ("switch the only heard source (mic -> a/v)", direct_only(rec_mic=1, mic=4, live_audio_volume=10), [],
      ["set mic 0", "set av 8", "apply"], False),
-    ("Audio Source mic -> a/v (a/v heard)", direct_only(rec_mic=1, av=8, live_audio_volume=10), [],
-     ["set_source 2", "apply"], False),
-    ("Audio Source a/v -> line in", direct_only(rec_av=1, av=8, live_audio_volume=10), [],
-     ["set_source 1", "apply"], False),
-    ("mix -> direct mic while recording", mix_only(mic=4, live_audio_volume=10), [],
-     ["set rec_mix 0", "set rec_mic 1", "apply"], False),
-    ("direct a/v -> mix (a/v heard) while recording", direct_only(rec_av=1, av=8, live_audio_volume=10), [],
-     ["set rec_mix 1", "apply"], False),
-    ("direct mic -> mix: mic level 0 -> 4 with Record Mic and the mix", mix_only(rec_mic=1, mic=0, av=8, live_audio_volume=10), [],
-     ["set mic 4", "apply"], False),
-    ("mix -> direct mic: mic level 4 -> 0 with Record Mic and the mix", mix_only(rec_mic=1, mic=4, av=8, live_audio_volume=10), [],
-     ["set mic 0", "apply"], False),
-    ("Record Headphone Mix off with direct mic and mic heard", mix_only(rec_mic=1, mic=4, av=8, live_audio_volume=10), [],
-     ["set rec_mix 0", "apply"], False),
-    ("Live Volume down (ripples' slider)", direct_only(rec_mic=1, av=8, live_audio_volume=10), [],
+    ("record a/v instead of the mic (a/v heard)", direct_only(rec_mic=1, av=8, live_audio_volume=10), [],
+     ["set rec_mic 0", "set rec_av 1", "apply"], False),
+    ("record line in instead of a/v", direct_only(rec_av=1, av=8, live_audio_volume=10), [],
+     ["set rec_av 0", "set rec_line_in 1", "apply"], False),
+    ("the last recorded input off: the mic stays on the ADC, silent", direct_only(rec_av=1, av=8, live_audio_volume=10), [],
+     ["set rec_av 0", "apply"], False),
+    ("nothing recorded -> the mic recorded", direct_only(av=8, live_audio_volume=10), [],
+     ["set rec_mic 1", "apply"], False),
+    ("nothing recorded -> a/v recorded", direct_only(av=8, live_audio_volume=10), [],
+     ["set rec_av 1", "apply"], False),
+    ("a second input recorded (mic + a/v)", direct_only(rec_mic=1, av=8, live_audio_volume=10), [],
+     ["set rec_av 1", "apply"], False),
+    ("Headphone Volume down", direct_only(rec_mic=1, av=8, live_audio_volume=10), [],
      ["set_live 4", "apply"], False),
-    ("hdmi in: line out off", mix_only(mic=4, av=8, live_audio_volume=10), [],
+    ("hdmi in: line out off", direct_only(rec_mic=1, mic=4, av=8, live_audio_volume=10), [],
      ["line_out 0"], False),
     ("hdmi in, direct a/v: line out off, a/v leaves the output mixers", direct_only(rec_av=1, av=8, live_audio_volume=10), [],
      ["line_out 0"], False),
     ("analog after hdmi in: a/v back in the output mixers, line out on", direct_only(rec_av=1, av=8, live_audio_volume=10),
      ["line_out 0"], ["line_out 1"], False),
-    ("Live Volume 0", mix_only(av=8, live_audio_volume=6), [],
+    ("Headphone Volume 0", direct_only(rec_mic=1, av=8, live_audio_volume=6), [],
      ["set live_audio_volume 0", "apply"], False),
-    ("hdmi-in audio starts (mic heard)", mix_only(mic=4, hdmi=4, live_audio_volume=10), ["line_out 0"],
+    ("hdmi-in audio starts (mic heard)", direct_only(rec_mic=1, mic=4, hdmi=4, live_audio_volume=10), ["line_out 0"],
      ["live_dac 1"], True),
-    ("hdmi-in audio: the only source changes (dac -> mic)", mix_only(hdmi=4, live_audio_volume=10),
+    ("hdmi-in audio: the only heard source changes (dac -> mic)", direct_only(rec_mic=1, hdmi=4, live_audio_volume=10),
      ["line_out 0", "live_dac 1"], ["set hdmi 0", "set mic 4", "apply"], True),
-    ("hdmi-in audio ends (hdmi in still shown)", mix_only(mic=4, hdmi=4, live_audio_volume=10),
+    ("hdmi-in audio ends (hdmi in still shown)", direct_only(rec_mic=1, mic=4, hdmi=4, live_audio_volume=10),
      ["line_out 0", "live_dac 1"], ["live_dac 0"], True),
 ]
 
@@ -845,7 +868,7 @@ HELD_BATCH = [(name, 0) for name in HELD_OFF]
 
 
 def dvr_volume_lines(level):
-    """ripples' dvr_set_dvr_audio_volume(level) (dvr.c 4fbb865): line out, DAC and both AIF1 DAC timeslots"""
+    """ripples' dvr_set_dvr_audio_volume(level) (dvr.c of 1.2.2): line out, DAC and both AIF1 DAC timeslots"""
     hw = [0, 26, 28, 29, 29, 30, 30, 31, 31][level]
     dac = 0 if level == 0 else {4: 153, 6: 157, 7: 158}.get(level, (hw * 160 + 15) // 31)
     return [f"codec lineout volume={hw}", f"codec DAC volume={dac}",
@@ -858,10 +881,10 @@ DVR_MUTE = codec_lines(dict(SEL("out_linein_off"))) + ["codec LINEINL/R to L_R o
 
 def test_hold(h):
     """ripples' playback and tests while the mixer is held (review of phase 3, findings 1, 4, 5, 7)."""
-    # DVR playback with Mic and Line In heard (line out on) and Record Headphone Mix on: the held batch
-    # first, then media_init()'s libmedia_mpp reset and adec2ao_start(); only the file is heard
+    # DVR playback with Mic and Line In heard (line out on): the held batch first, then media_init()'s
+    # libmedia_mpp reset and adec2ao_start(); only the file is heard
     test = f"{h.target} hold: DVR playback with the page's headphone sources"
-    values = direct_only(rec_mic=1, rec_mix=1, mic=4, line_in=3, av=8, live_audio_volume=10, phones_at_boot=1)
+    values = direct_only(rec_mic=1, mic=4, line_in=3, av=8, live_audio_volume=10, phones_at_boot=1)
     lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "mark", "hold 1", "mark"]
     lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + DVR_MUTE + dvr_volume_lines(5) + ["dump", "hold 0", "wait", "dump"]
     batches, _, _, _, _ = h.run(mixer_ini(values), lines)
@@ -882,10 +905,10 @@ def test_hold(h):
     else:
         ok(test)
 
-    # the Audio page's Mic test with Record Headphone Mix on (Line In and A/V In in the mix): ripples'
-    # routing (in_mic1, its gain, dvr_mute_live_audio) records the mic directly and nothing else
+    # the Audio page's Mic test with Line In and A/V In recorded and heard: ripples' routing (in_mic1, its
+    # gain, dvr_mute_live_audio) records the mic directly and nothing else
     test = f"{h.target} hold: the Mic test records only the mic"
-    values = mix_only(mic=4, line_in=3, av=8, live_audio_volume=10)
+    values = direct_only(rec_line_in=1, rec_av=1, mic=4, line_in=3, av=8, live_audio_volume=10)
     lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "hold_test 1"]
     lines += codec_lines(dict(SEL("in_mic1"))) + ["codec MIC1 boost AMP gain control=4"] + DVR_MUTE + ["dump", "hold_test 0", "wait", "dump"]
     h.run(mixer_ini(values), lines)
@@ -967,7 +990,7 @@ def test_transitions(h):
 
 def test_worker(h):
     test = f"{h.target} worker"
-    values = mix_only(av=8, live_audio_volume=10)
+    values = direct_only(rec_av=1, av=8, live_audio_volume=10)
     ini = mixer_ini(values)
     lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "mark", "amixer_delay 150",
                                                          "time_apply 20", "unsaved", "wait", "dump"]
@@ -1156,10 +1179,11 @@ def test_daemon_restart(h):
         for name, values, start in (
                 ("boot into HDZero (stock: silent)", old, []),
                 ("HDMI in", old, ["line_out 0"]),
-                ("Live Volume 0 on an analog source", dict(old, live_audio_volume=0, phones_at_boot=1), ["line_out 1"]),
-                ("HDMI in, Record Headphone Mix with mic", dict(old, rec_mix=1, mic=4), ["line_out 0"]),
-                ("HDMI in audio, Live Volume 0, mix", dict(old, rec_mix=1, hdmi=4, live_audio_volume=0), ["line_out 0", "live_dac 1"]),
-                ("HDMI in audio, Live Volume 0, no mix", dict(old, rec_mix=0, hdmi=4, live_audio_volume=0), ["line_out 0", "live_dac 1"])):
+                ("Headphone Volume 0 on an analog source", dict(old, live_audio_volume=0, phones_at_boot=1), ["line_out 1"]),
+                ("HDMI in, mic heard and recorded", dict(old, rec_mic=1, mic=4), ["line_out 0"]),
+                ("HDMI in audio, Headphone Volume 0", dict(old, hdmi=4, live_audio_volume=0), ["line_out 0", "live_dac 1"]),
+                ("HDMI in audio, Headphone Volume 0, nothing recorded", dict(old, rec_mic=0, rec_line_in=0, rec_av=0, hdmi=4, live_audio_volume=0),
+                 ["line_out 0", "live_dac 1"])):
             test = f"{h.target} daemon restart, Audio Source {audio_source}, {name}"
             lines = codec_lines(base_codec(h.target)) + START + ["apply", "wait"] + start + ["wait", "dump", "mark"]
             lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 2 + 30}", "mark", "dump"]
@@ -1168,7 +1192,7 @@ def test_daemon_restart(h):
             dac = "live_dac 1" in start
             reset = cm.daemon_restart(before)
             allowed = cm.recorded_via_mix(before, dac_active=dac)
-            if dac and values.get("rec_mix", 0) == 0:
+            if dac:
                 # The reset itself switches the left DAC into the output mixer (LIBMEDIA_RESET), which no
                 # mixer setting can prevent: here only the state before it shows the rule.
                 allowed |= {"dac"}
