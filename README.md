@@ -1,3 +1,69 @@
+# juricabi's HDZero goggle firmware
+
+juricabi's firmware is built on [ripples' Custom HDZero Goggles Firmware](https://github.com/LVTY-AI/hdzero-goggle)
+1.2.2, with the additions below: version `1.2.2-juricabi.1` = ripples' 1.2.2 plus juricabi's changes, number 1.
+It is **not** an official ripples or HDZero release, and ripples' testing of 1.2.2 does not cover these
+additions. Goggle 1, Goggle 2 and BoxPro.
+
+**Status: pre-release, never run on a real goggle.** It passed its host tests, the emulator on all three targets
+and an independent review ([docs/status.md](docs/status.md)). Flash it only if you can go back
+([docs/first-flash.md](docs/first-flash.md)).
+
+## What it adds to ripples 1.2.2
+
+* **Module bay control**: tune an analog module in the bay from the goggle (Switch, rapidFIRE, SteadyView,
+  SteadyView X). Needs the 3-wire bay mod; with Module = None (the default) the goggle leaves the bay pins alone.
+  [docs/module-bay.md](docs/module-bay.md), [docs/module-bay-mod-safety.md](docs/module-bay-mod-safety.md)
+* **Stream Audio**: the recorded sound as an AAC track of the WiFi live stream (off by default).
+  [docs/live-audio.md](docs/live-audio.md)
+* **HDMI Out / HDMI In audio** (experimental, off): HDMI Out Audio stays locked until the read-only probe gives
+  this board a GO. [docs/hdmi-audio.md](docs/hdmi-audio.md), [utilities/probe/README.md](utilities/probe/README.md)
+* **Audio page extras** below ripples' own rows: a headphone level per source, what is recorded (each source,
+  the headphone mix), the built-in receiver's audio. [docs/audio.md](docs/audio.md)
+
+## Safety first
+
+* Read the mod guide, [docs/module-bay-mod-safety.md](docs/module-bay-mod-safety.md), before you solder or put a
+  module under goggle control, and follow its checklist in its order.
+* With the mod, use a Furious True-D only with its MOD 1.17 firmware in `BAY:RAPIDFIRE` (Module = rapidFIRE).
+* Fly with WiFi off: the bay pins are the WiFi chip's bus.
+* Never insert or remove a module with the goggle on.
+
+## Flash, go back, build
+
+* **Images**: on this repository's Releases page, one per goggle, each with its `.sha256`:
+  `HDZERO_GOGGLE-77-206-1.2.2-juricabi.1.bin`, `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.1.bin`,
+  `HDZERO_BOXPRO-77-211-1.2.2-juricabi.1.bin`. The Firmware page shows the version as `juricabi.1 ripples 1.2.2`.
+* **Flash and go back**: [docs/first-flash.md](docs/first-flash.md): what to keep before you flash (ripples'
+  official 1.2.2 and the HDZero recovery package), the SD card, the flash from the menu, the checks in their order
+  (the untouched goggle, the Audio page, Stream Audio, the probe and HDMI audio only on a GO, then the module bay),
+  and the way back to ripples' 1.2.2.
+* **Build**: as in ripples' README below (`setup.sh`, then `make` in `build_goggle`, `build_goggle2` or
+  `build_boxpro`), or all three images at once on Linux with `utilities/dev/build_all.sh <worktree> goggle
+  goggle2 boxpro` ([utilities/dev/README.md](utilities/dev/README.md)). A build at a git tag names the images by
+  the version alone; any other build appends `-<commit>` (`mkapp/mkapp_ota.sh`).
+  `utilities/dev/check_version.py --images <dir>` checks the version and the image names.
+
+## Credits and licence
+
+* **ripples** ([LVTY-AI/hdzero-goggle](https://github.com/LVTY-AI/hdzero-goggle)): the firmware this is built on;
+  its code is kept as the branch `upstream` of this repository.
+* **The HDZero Goggle Project** ([hd-zero/hdzero-goggle](https://github.com/hd-zero/hdzero-goggle)): the original
+  firmware, MIT licence ([LICENSE](LICENSE)), under which juricabi's changes are as well.
+* **pkendall64**: the analog module control the module bay support follows (his
+  [wiki](https://github.com/pkendall64/hdzero-goggle/wiki/Analog-Module-Backpack-Control) and
+  analog-module-control code).
+* **live555** (`lib/live`, used by the live stream server as upstream; LGPL) and the other libraries under `lib/`
+  under their own licences.
+* ITE's public IT6602/IT66021 driver and the ITE and Allwinner data sheets in `docs/`: read for the HDMI audio work
+  (docs/hdmi-audio.md lists the sources).
+
+ripples' donation link in the README below supports ripples' work, not juricabi's firmware.
+
+---
+
+*Everything below this line is ripples' README of 1.2.2, unchanged.*
+
 # ripples' Custom HDZero Goggles Firmware
 
 To install this firmware, head on over to the [releases](https://github.com/LVTY-AI/hdzero-goggle/releases) page and download the latest version for your goggles! I also have backups on [Google Drive](https://drive.google.com/drive/folders/1L3Wu2_ggWYJpjnqjVrTsP1es7GogYQT6?usp=share_link), as well as the recovery firmware files and VTX firmwares on there.
