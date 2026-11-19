@@ -3,7 +3,7 @@
 
 #include "core/settings.h"
 
-#define TRANSLATE_STRING_NUM 384
+#define TRANSLATE_STRING_NUM 512 // entries per language file (the longest, ja_jp: 384 with the Audio page; check_strings.py counts them)
 #define LANG_FOLDER          "/mnt/app/language"
 
 typedef enum {

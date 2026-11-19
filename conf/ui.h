@@ -129,9 +129,29 @@ extern "C" {
 #define UI_POWER_ROWS                     60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, LV_GRID_TEMPLATE_LAST
 #define UI_RECORD_COLS                    160, 200, 200, 160, 120, 120, LV_GRID_TEMPLATE_LAST
 #define UI_RECORD_ROWS                    60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, LV_GRID_TEMPLATE_LAST
-#define UI_AUDIO_COLS                     160, 200, 200, 160, 120, 120, LV_GRID_TEMPLATE_LAST
-#define UI_AUDIO_ROWS                     50, 50, 50, 50, 50, 50, 50, 50, 50, 50, LV_GRID_TEMPLATE_LAST
-#define UI_AUDIO_TEST_BUTTON_WIDTH        122
+// Audio page (ripples' rows with all's extras): indent, label, two button columns (arrow + button;
+// sliders, ripples' Audio Source and its test buttons span them, the spacer and the value column),
+// spacer, value; section headings span the row. The rows scroll in a window of UI_AUDIO_VIEW_H with
+// the hint below it (up to UI_AUDIO_HINT_LINES lines: ripples' note of the test buttons). Every
+// translation fits (utilities/audio_mixer/check_strings.py).
+#define UI_AUDIO_COL_INDENT               171 // no column gaps: labels where the other pages have them
+#define UI_AUDIO_COL_LABEL                400
+#define UI_AUDIO_COL_BUTTON               152
+#define UI_AUDIO_COL_SPACER               0
+#define UI_AUDIO_COL_VALUE                120 // "Mix", "Restart", "Error", "+6.0 dB" in every language
+#define UI_AUDIO_GRID_MAX_W               995 // page view width - UI_STYLE_SUBMENU_PAD_LEFT - room for the scroll bar
+#define UI_AUDIO_ARROW_W                  36
+#define UI_AUDIO_BTN_PAD                  8
+#define UI_AUDIO_SLIDER_GAP               20 // between a slider at its maximum and the value
+#define UI_AUDIO_ROW_H                    60 // as on the other pages; headings too, so that the window
+#define UI_AUDIO_VIEW_H                   600 // (10 rows) always shows whole rows
+#define UI_AUDIO_KNOB_PAD                 20  // slider knob inside its row (as on the other pages)
+#define UI_AUDIO_HINT_FONT                &lv_font_montserrat_20
+#define UI_AUDIO_HINT_LINES               4
+#define UI_AUDIO_HEADING_FONT             &lv_font_montserrat_20
+#define UI_AUDIO_HEADING_COLOR            0x7fc4ff
+#define UI_AUDIO_HINT_PAD                 14
+#define UI_AUDIO_PAD_TOP                  84
 #define UI_AUDIO_TEST_BUTTON_HEIGHT       40
 #define UI_AUDIO_TEST_BUTTON_GAP          12
 // Idle test-button grey. Kept distinct from UI_STYLE_SELECT_BG_COLOR
@@ -286,9 +306,25 @@ static inline int UI_STATUS_BAR_LABEL_WIDTH() {
 #define UI_POWER_ROWS                     40, 40, 40, 40, 40, 40, 40, 40, 40, 40, LV_GRID_TEMPLATE_LAST
 #define UI_RECORD_COLS                    106, 132, 132, 106, 80, 80, LV_GRID_TEMPLATE_LAST
 #define UI_RECORD_ROWS                    40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, LV_GRID_TEMPLATE_LAST
-#define UI_AUDIO_COLS                     106, 132, 132, 106, 80, 80, LV_GRID_TEMPLATE_LAST
-#define UI_AUDIO_ROWS                     36, 36, 36, 36, 36, 36, 36, 36, 36, 36, LV_GRID_TEMPLATE_LAST
-#define UI_AUDIO_TEST_BUTTON_WIDTH        84
+// Audio page, as on the goggles
+#define UI_AUDIO_COL_INDENT               112
+#define UI_AUDIO_COL_LABEL                300
+#define UI_AUDIO_COL_BUTTON               120
+#define UI_AUDIO_COL_SPACER               0
+#define UI_AUDIO_COL_VALUE                90
+#define UI_AUDIO_GRID_MAX_W               742
+#define UI_AUDIO_ARROW_W                  28
+#define UI_AUDIO_BTN_PAD                  6
+#define UI_AUDIO_SLIDER_GAP               14
+#define UI_AUDIO_ROW_H                    40
+#define UI_AUDIO_VIEW_H                   400 // 10 rows
+#define UI_AUDIO_KNOB_PAD                 18  // slider knob inside its row (2 + 2 x 18 < 40)
+#define UI_AUDIO_HINT_FONT                &lv_font_montserrat_14
+#define UI_AUDIO_HINT_LINES               4
+#define UI_AUDIO_HEADING_FONT             &lv_font_montserrat_16
+#define UI_AUDIO_HEADING_COLOR            0x4f8fc0
+#define UI_AUDIO_HINT_PAD                 8
+#define UI_AUDIO_PAD_TOP                  30
 #define UI_AUDIO_TEST_BUTTON_HEIGHT       28
 #define UI_AUDIO_TEST_BUTTON_GAP          8
 // Idle test-button grey. BoxPro's row highlight is 0x404040, so the boxes use
