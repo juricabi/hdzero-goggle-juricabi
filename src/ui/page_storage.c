@@ -8,6 +8,7 @@
 
 #include "../conf/ui.h"
 
+#include "core/audio_mixer.h"
 #include "core/common.hh"
 #include "core/settings.h"
 #include "lang/language.h"
@@ -221,6 +222,9 @@ static format_codes_t page_storage_format_sd() {
     clear_videofile_cnt();
     sdcard_update_free_size();
 
+    // formatsd.sh starts the record daemon again (its AW_MPI_SYS_Init resets the codec mixer)
+    audio_mixer_recheck();
+
     // Restore logging if needed
     if (applogfile) {
         if (g_setting.storage.selftest) {
@@ -302,6 +306,10 @@ static repair_codes_t page_storage_repair_sd() {
             }
         }
     }
+
+    // chkfixsd.sh starts the record daemon again (its AW_MPI_SYS_Init resets the codec mixer):
+    // also the automatic check at boot and after a card is inserted
+    audio_mixer_recheck();
 
     // Restore logging if needed
     if (app_log_file) {

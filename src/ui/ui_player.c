@@ -8,6 +8,7 @@
 
 #include "../conf/ui.h"
 #include "common.hh"
+#include "core/audio_mixer.h"
 #include "player/media.h"
 #include "record/record_definitions.h"
 #include "ui/ui_style.h"
@@ -362,6 +363,8 @@ void mplayer_file(char *fname) {
     LOGI("mplayer %s", fname);
     load_stars(fname);
     init_mplayer();
+    // ripples' playback code drives the codec (player/adec2ao.c: live audio muted, DVR Playback volume)
+    audio_mixer_hold(true);
     media_init(fname);
     media_start();
     update_mplayer();
@@ -373,6 +376,8 @@ void mplayer_exit() {
         media_exit(media);
         media = NULL;
     }
+    // the mixer's state again (its media_init's AW_MPI_SYS_Init reset the mixer too)
+    audio_mixer_hold(false);
     pthread_mutex_lock(&lvgl_mutex);
     free_mplayer();
 }

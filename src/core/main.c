@@ -25,6 +25,7 @@ SDL_mutex *global_sdl_mutex;
 #include "core/dvr.h"
 #include "core/common.hh"
 #include "core/elrs.h"
+#include "core/audio_mixer.h"
 #include "core/hdmi_audio.h"
 #include "core/ht.h"
 #include "core/input_device.h"
@@ -258,6 +259,23 @@ int main(int argc, char *argv[]) {
     // 1. Recall configuration
     settings_init();
     settings_load();
+    {
+        // the audio mixer takes over ripples' audio settings (and fills them in from a setting.ini of
+        // all's firmware): g_setting.record gets them back
+        audio_mixer_record_t rec = {
+            .audio_source = g_setting.record.audio_source,
+            .live_volume = g_setting.record.live_audio_volume,
+            .dvr_volume = g_setting.record.dvr_audio_volume,
+            .mic_gain = g_setting.record.mic_gain,
+            .linein_gain = g_setting.record.linein_gain,
+        };
+        audio_mixer_init(&rec);
+        g_setting.record.audio_source = rec.audio_source;
+        g_setting.record.live_audio_volume = rec.live_volume;
+        g_setting.record.dvr_audio_volume = rec.dvr_volume;
+        g_setting.record.mic_gain = rec.mic_gain;
+        g_setting.record.linein_gain = rec.linein_gain;
+    }
     hdmi_audio_load(); // HDMI audio (experimental, default off): what is in effect this boot (/tmp/hdmi_audio.boot)
 #if defined(HDZBOXPRO) || defined(HDZGOGGLE2) || defined(HDZGOGGLE)
     scan_core_self_check();
@@ -312,6 +330,9 @@ int main(int argc, char *argv[]) {
 
     // 7. Start threads
     g_bootup_sdcard_state = sdcard_mounted() ? 1 : 0;
+    // audio routing for every source (a source switch applies it again; the mixer's
+    // worker also undoes the reset of the record daemon started by rc.sh)
+    audio_mixer_apply();
     start_running();
     hdmi_audio_apply(g_source_info.source == SOURCE_HDMI_IN && g_app_state == APP_STATE_VIDEO); // HDMI audio (experimental)
     create_threads();

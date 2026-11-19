@@ -28,6 +28,7 @@
 
 #include "core/msp_displayport.h"
 #include "core/app_state.h"
+#include "core/audio_mixer.h"
 #include "core/settings.h"
 #include "driver/hardware.h"
 #include "driver/rtc.h"
@@ -134,7 +135,19 @@ void dvr_update_status() {
     // Recorder health is polled by the control worker, never the fan loop.
 }
 
+// Audio routing is done by the audio mixer (core/audio_mixer.c, the Audio page). These keep their call
+// sites: line out off for HDMI in (on for an analog source), and a full re-apply of the mixer (record
+// and headphone routing) at recording start and on source switches. ripples' own routines below
+// (dvr_test_*, the volumes, mute / restore) drive the codec while the mixer is held: DVR playback
+// (player/adec2ao.c, held by ui_player.c) and the Audio page's test buttons.
 void dvr_enable_line_out(bool enable) {
+    live_audio_line_out_enabled = enable;
+    live_audio_muted_for_dvr = false;
+    audio_mixer_set_line_out(enable);
+}
+
+// ripples' dvr_enable_line_out(), for the Audio page's Live test (the mixer held)
+void dvr_test_line_out(bool enable) {
     char buf[128];
     if (enable) {
         live_audio_line_out_enabled = true;
@@ -275,6 +288,7 @@ void dvr_restore_live_audio(void) {
     live_audio_muted_for_dvr = false;
 }
 
+// ripples' routing of one source into the ADC, for the Audio page's Mic and Line/AV tests (the mixer held)
 static void dvr_select_audio_values(uint8_t source, int mic_gain, int linein_gain) {
     char buf[128];
     char *audio_source[3] = {
@@ -290,8 +304,14 @@ static void dvr_select_audio_values(uint8_t source, int mic_gain, int linein_gai
     else dvr_set_linein_gain(linein_gain);
 }
 
-void dvr_select_audio_source(uint8_t source) {
+void dvr_test_select_audio_source(uint8_t source) {
     dvr_select_audio_values(source, g_setting.record.mic_gain, g_setting.record.linein_gain);
+}
+
+void dvr_select_audio_source(uint8_t source) {
+    (void)source; // (the Record switches of the mixer, of which ripples' Audio Source is the preset)
+    // synchronous like before: a recording that starts next has its routing
+    audio_mixer_apply_wait(1000);
 }
 
 // video input config
@@ -437,7 +457,8 @@ static bool dvr_update_record_conf(const dvr_snapshot_t *snapshot) {
     }
 
     dvr_ini_putl("record", "audio", snapshot->record.audio, config_file);
-    dvr_select_audio_values(snapshot->record.audio_source, snapshot->record.mic_gain, snapshot->record.linein_gain);
+    // the recording's audio routing: the mixer's state (the Audio page), in the codec before the start
+    audio_mixer_apply_wait(1000);
     // An unset clock only changes this recording, not the saved preference.
     // Recheck at each start so a later clock sync enables Date naming again.
     setting_record_naming_t naming = snapshot->record.naming;

@@ -2,19 +2,17 @@
 /* ===========================================================================
  * HDMI audio routing (EXPERIMENTAL, default off). See docs/hdmi-audio.md.
  *
- * setting.ini (own section; set by hand on ripples-all until the Audio page has the
- * HDMI Out Audio / HDMI In Audio switches, which change it through hdmi_audio_set(),
- * which only stores):
+ * setting.ini (own section; the Audio page's HDMI Out Audio / HDMI In Audio switches
+ * change it through hdmi_audio_set(), which only stores):
  *   [hdmi]
  *   audio_out=0  1 = IT66121 sends 48 kHz stereo L-PCM taken from its I2S input,
  *                    and the record daemon copies the ADC capture (the same signal
  *                    that is recorded) to I2S0 (ALSA hw:snddaudio0).
  *   audio_in=0   1 = while HDMI in is shown, the record daemon plays I2S2 (ALSA
  *                    hw:snddaudio2, assumed IT66021 audio) into the codec DAC, which
- *                    is heard on the line out at the DVR Playback volume (ripples' codec
- *                    routing, hdmi_audio.c hdmi_audio_line_out(); not recorded); the
- *                    line out then stays on during HDMI in. The EDID offers 48 kHz
- *                    L-PCM only.
+ *                    the audio mixer takes in as a live source (the HDMI In level of
+ *                    the Audio page; recorded with Record Headphone Mix); the line out
+ *                    then stays on during HDMI in. The EDID offers 48 kHz L-PCM only.
  * Only exactly "1" counts; any other value, a missing key or an unreadable file is 0.
  *
  * Both take effect only at the next boot: rc.sh runs hdmi_audio_boot, which records what

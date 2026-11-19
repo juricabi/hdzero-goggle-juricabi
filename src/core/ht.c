@@ -13,6 +13,7 @@
 #include <minIni.h>
 
 #include "MadgwickAHRS.h"
+#include "core/audio_mixer.h"
 #include "common.hh"
 #include "elrs.h"
 #include "ht.h"
@@ -179,7 +180,7 @@ static void detect_motion(bool is_moving) {
                                    g_setting.source.auto_protocol_detect);
 #endif
             if (g_hw_stat.source_mode == SOURCE_MODE_AV && use_internal_analog) {
-                rtc6715.init(1, g_setting.record.audio_source == SETTING_RECORD_AUDIO_SOURCE_AV_IN);
+                rtc6715.init(1, audio_mixer_rx_audio());
                 rtc6715.set_ch(g_setting.source.analog_channel - 1);
             }
 #endif

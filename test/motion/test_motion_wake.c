@@ -58,6 +58,9 @@ void DM6302_SetChannel(uint8_t band, uint8_t channel) {
     hdz_tune_calls++;
 }
 void beep_dur(int ms) {}
+// the audio mixer (ripples-all): Built-in RX Audio, as ripples' Audio Source presets it (A/V In: on), which is
+// what ht.c must hand the receiver on power-on
+bool audio_mixer_rx_audio(void) { return g_setting.record.audio_source == SETTING_RECORD_AUDIO_SOURCE_AV_IN; }
 int log_printf(const char *file, const char *func, int line, const int level, const char *fmt, ...) { return 0; }
 
 int main(int argc, char **argv) {
