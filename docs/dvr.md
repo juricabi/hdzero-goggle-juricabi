@@ -38,6 +38,11 @@ position, however busy the goggle was meanwhile.
 * **The DVR button wins**: after a press, the arm is not enforced until the backpack's next command.
   A stop by the button in Record Mode Auto holds until the picture has been gone for 2 s (the next
   flight then records again).
+* **A start that does not hold** (the recorder refuses or fails: a card it cannot write, no record folder,
+  a full card; `HDZGOGGLE.log` says which, `DVR: the recorder did not start: status N (...)`) is tried again
+  after 1 s, then 5 s, then every 15 s, until a recording holds for 3 s, the backpack's next command or a
+  button press. (On the owner's goggle a card with a damaged filesystem made every start fail; the armed
+  DVR then started and stopped every second.)
 * **No backpack command since the goggle started**: nothing changes, as on ripples.
 
 ## What it fixes (ripples 1.2.2)
@@ -53,9 +58,11 @@ position, however busy the goggle was meanwhile.
 * **Every start and stop held the goggle for 2 s** (`sleep(2)` "wait for record process" in
   `dvr_cmd()`, under its lock). The backpack's commands were handled in its reader thread, so commands
   that came meanwhile, and a DVR button press, waited behind it: a switch flipped fast left the DVR
-  seconds behind (the owner's log, 21:52 to 21:55). The goggle now waits only until the recorder's status
-  says it has started or stopped, at most those 2 s (the owner's `dvr_dbg.log`: well under a second), and
-  the reader thread never waits.
+  seconds behind (the owner's log, 21:52 to 21:55). The goggle now waits for the recorder's status
+  instead, so the two stay in step: after a start until it says "recording" (at most 2 s; an error ends
+  the wait and the start counts as failed), after a stop until it no longer does (well under a second in
+  the owner's `dvr_dbg.log`, but up to 3 s for a recording stopped within a second of its start: at most
+  4 s). A start waits for a stop that the recorder has not finished. The reader thread never waits.
 
 ## Commands that never arrive: set the radio's Telem Ratio to 1:16
 
@@ -108,8 +115,8 @@ part of the recorder's loop (`slow live_run: ... ms`).
 
 ## Checks
 
-`test/dvr/test_dvr_auto.c` checks the decisions on the host (`make -C test/dvr run`; 18 of 18 mutants of
-`dvr_auto.c` caught). On a goggle:
+`test/dvr/test_dvr_auto.c` checks the decisions on the host (`make -C test/dvr run`; 25 of 25 mutants of
+`dvr_auto.c` caught). The waits for the recorder (`dvr.c`) have no host test. On a goggle:
 
 1. Record Mode Manual, arm: recording. Open the menu, close it: a new recording. Disarm: it stops after
    the stop delay.

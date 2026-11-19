@@ -34,6 +34,13 @@ extern "C" {
 // how often an enforced start is tried again (it was refused: busy, or the recorder failed)
 #define DVR_AUTO_RETRY_MS      1000
 #define DVR_AUTO_RETRY_BUSY_MS 250
+// An enforced start that did not hold (no recording DVR_AUTO_HOLD_MS long came of it: the recorder refused
+// or failed, as with a card it could not write on the owner's goggle, where the DVR then started and
+// stopped every second): tried again after DVR_AUTO_RETRY_MS, then DVR_AUTO_RETRY2_MS, then every
+// DVR_AUTO_RETRY3_MS, until a recording holds, the backpack's next command or a button press.
+#define DVR_AUTO_HOLD_MS   3000
+#define DVR_AUTO_RETRY2_MS 5000
+#define DVR_AUTO_RETRY3_MS 15000
 // Record Mode Auto, after a stop by the button: passes (about 100 ms each) without a picture after which
 // the picture may start a recording again
 #define DVR_AUTO_LOSS_PASSES 20
@@ -62,6 +69,9 @@ typedef struct {
     bool due_on;           // ... arm (true) or stop (false) ...
     uint64_t due_ms;       // ... until then
     uint64_t next_try_ms;  // an enforced start not before then
+    unsigned fails;        // enforced starts in a row that have not held (yet)
+    bool was_recording;    // recording at the last pass ...
+    uint64_t rec_since_ms; // ... since then
 } dvr_auto_t;
 
 // What the goggle is doing, taken for every call.

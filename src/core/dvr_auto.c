@@ -15,7 +15,11 @@ static dvr_auto_action_t enforce(dvr_auto_t *s, const dvr_auto_env_t *env) {
         return DVR_AUTO_NOTHING;
     if (env->now_ms < s->next_try_ms)
         return DVR_AUTO_NOTHING;
-    s->next_try_ms = env->now_ms + DVR_AUTO_RETRY_MS;
+    // again after DVR_AUTO_RETRY_MS, then more slowly as long as no start holds
+    static const unsigned retry_ms[] = {DVR_AUTO_RETRY_MS, DVR_AUTO_RETRY2_MS, DVR_AUTO_RETRY3_MS};
+    s->next_try_ms = env->now_ms + retry_ms[s->fails < 2 ? s->fails : 2];
+    if (s->fails < 2)
+        s->fails++;
     return DVR_AUTO_START;
 }
 
@@ -24,6 +28,7 @@ void dvr_auto_backpack(dvr_auto_t *s, bool on, unsigned delay_s, const dvr_auto_
     s->held = false;
     s->user_stopped = false;
     s->due = false;
+    s->fails = 0;
     if (on) {
         if (delay_s == 0) {
             s->arm = DVR_AUTO_ARM_ON;
@@ -50,6 +55,13 @@ dvr_auto_action_t dvr_auto_step(dvr_auto_t *s, const dvr_auto_env_t *env, bool p
         s->user_stopped = false; // the picture was gone a while: the next one may start a recording
     }
 
+    // a recording that held DVR_AUTO_HOLD_MS: the start before it was good
+    if (env->recording && !s->was_recording)
+        s->rec_since_ms = env->now_ms;
+    if ((env->recording || s->was_recording) && env->now_ms - s->rec_since_ms >= DVR_AUTO_HOLD_MS)
+        s->fails = 0;
+    s->was_recording = env->recording;
+
     if (s->due && env->now_ms >= s->due_ms) {
         if (s->due_on) {
             s->due = false;
@@ -67,12 +79,15 @@ dvr_auto_action_t dvr_auto_step(dvr_auto_t *s, const dvr_auto_env_t *env, bool p
 
 void dvr_auto_refused(dvr_auto_t *s, uint64_t now_ms) {
     s->next_try_ms = now_ms + DVR_AUTO_RETRY_BUSY_MS;
+    if (s->fails)
+        s->fails--; // (not a start that failed: it was not made)
 }
 
 void dvr_auto_button(dvr_auto_t *s, bool stopping) {
     // the pilot's own press is the latest word: the arm is not enforced, a delayed command is dropped
     s->held = true;
     s->due = false;
+    s->fails = 0;
     s->user_stopped = stopping;
     if (stopping)
         s->lost_passes = 0;

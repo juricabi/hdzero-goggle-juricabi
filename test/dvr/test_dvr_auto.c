@@ -168,6 +168,71 @@ static void test_disarm_while_start_under_way(void) {
     EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_NOTHING, "a recording after that: not stopped");
 }
 
+static void test_start_that_does_not_hold(void) {
+    // The owner's goggle with a card the recorder could not write: every start failed at once, and the
+    // armed DVR started and stopped every second. Now: again after 1 s, then 5 s, then every 15 s.
+    dvr_auto_t s;
+    dvr_auto_reset(&s);
+    dvr_auto_env_t e = video(0);
+    EXPECT(command(&s, true, 0, &e), DVR_AUTO_START, "armed: start"); // at 100; no recording comes of it
+    uint64_t t0 = e.now_ms;
+    e.now_ms = t0 + DVR_AUTO_RETRY_MS - 100;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_NOTHING, "failed: not before 1 s");
+    e.now_ms = t0 + DVR_AUTO_RETRY_MS;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "failed: again after 1 s");
+    t0 = e.now_ms;
+    e.now_ms = t0 + DVR_AUTO_RETRY2_MS - 100;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_NOTHING, "failed twice: not before 5 s");
+    e.now_ms = t0 + DVR_AUTO_RETRY2_MS;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "failed twice: again after 5 s");
+    for (int i = 0; i < 3; i++) {
+        t0 = e.now_ms;
+        e.now_ms = t0 + DVR_AUTO_RETRY3_MS - 100;
+        EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_NOTHING, "failing: not before 15 s");
+        e.now_ms = t0 + DVR_AUTO_RETRY3_MS;
+        EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "failing: again every 15 s");
+    }
+
+    // a start that was refused before it was made (the goggle busy) is not a failed one
+    t0 = e.now_ms;
+    dvr_auto_refused(&s, t0);
+    e.now_ms = t0 + DVR_AUTO_RETRY_BUSY_MS;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "refused: again after the busy retry");
+
+    // the backpack's next command starts afresh: at once, and 1 s after that
+    dvr_auto_backpack(&s, false, 0, &e);
+    EXPECT(command(&s, true, 0, &e), DVR_AUTO_START, "armed again: start at once");
+    t0 = e.now_ms;
+    e.now_ms = t0 + DVR_AUTO_RETRY_MS;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "armed again: the first retry after 1 s");
+
+    // a recording that holds 3 s makes the start good: one that a menu ends later starts again at once,
+    // and a failure after that is retried after 1 s again
+    e.recording = true;
+    e.now_ms += 100;
+    dvr_auto_step(&s, &e, true);
+    e.now_ms += DVR_AUTO_HOLD_MS;
+    dvr_auto_step(&s, &e, true);
+    e.recording = false;
+    e.now_ms += 60000;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "a recording held, ended: start again at once");
+    t0 = e.now_ms;
+    e.now_ms = t0 + DVR_AUTO_RETRY_MS;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "a recording held: a failure after it, 1 s again");
+
+    // a recording that ended before it held 3 s does not make it good
+    e.recording = true;
+    e.now_ms += 100;
+    dvr_auto_step(&s, &e, true);
+    e.recording = false;
+    e.now_ms += DVR_AUTO_HOLD_MS - 200;
+    dvr_auto_step(&s, &e, true);
+    e.now_ms = t0 + DVR_AUTO_RETRY_MS + DVR_AUTO_RETRY2_MS;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_START, "a recording under 3 s: the next try after the 5 s");
+    e.now_ms += DVR_AUTO_RETRY_MS;
+    EXPECT(dvr_auto_step(&s, &e, true), DVR_AUTO_NOTHING, "a recording under 3 s: not good, the retries stay slow");
+}
+
 static void test_delays(void) {
     dvr_auto_t s;
     dvr_auto_reset(&s);
@@ -315,6 +380,7 @@ int main(void) {
     test_armed_in_menu();
     test_fast_toggles();
     test_disarm_while_start_under_way();
+    test_start_that_does_not_hold();
     test_delays();
     test_disarm_now();
     test_button();

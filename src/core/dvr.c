@@ -96,23 +96,63 @@ static uint64_t monotonic_ms(void);
 static void dvr_dbg_log(const char *fmt, ...);
 
 // juricabi: ripples waited a fixed 2 s after every start and stop command to the recorder ("wait for
-// record process"). Now only until the recorder's status file says it has started (1, or an error: 3
-// and above) or stopped (anything but 1: written once the file is closed), at most those 2 s. The owner's
-// dvr_dbg.log shows the recorder needing well under a second.
-#define RECORD_STATUS_WAIT_MS 2000
-static void wait_record_status(bool started) {
+// record process"). The goggle waits for the recorder's status file instead, so the two stay in step:
+// - a stop: until the status is no longer 1 (written once the file is closed). The owner's dvr_dbg.log:
+//   well under a second, but up to 3 s for a recording stopped within a second of its start. At most 4 s.
+// - a start: until the status is 1, at most 2 s. An error (3 and above) that was not there before the
+//   start ends the wait at once; one that was (left by an earlier failure) only at the end.
+#define RECORD_START_WAIT_MS 2000
+#define RECORD_STOP_WAIT_MS  4000
+
+static const char *record_status_name(int st) {
+    switch (st) {
+    case 0:
+        return "idle";
+    case 1:
+        return "recording";
+    case 2:
+        return "stopped";
+    case 3:
+        return "no SD card";
+    case 4:
+        return "record folder not usable";
+    case 5:
+        return "SD card full";
+    case 6:
+        return "no frames";
+    case 7:
+        return "record file not opened";
+    default:
+        return "no status";
+    }
+}
+
+// Until the recorder has stopped (its status is not 1). The status at the end.
+static int wait_record_stopped(const char *what) {
     const uint64_t began = monotonic_ms();
     int st;
     for (;;) {
         st = read_record_status();
-        if (started ? (st == 1 || st >= 3) : (st != 1))
-            break;
-        if (monotonic_ms() - began >= RECORD_STATUS_WAIT_MS)
+        if (st != 1 || monotonic_ms() - began >= RECORD_STOP_WAIT_MS)
             break;
         usleep(50 * 1000);
     }
-    dvr_dbg_log("%s: the recorder's status %d after %llu ms", started ? "start" : "stop", st,
-                (unsigned long long)(monotonic_ms() - began));
+    dvr_dbg_log("%s: the recorder's status %d after %llu ms", what, st, (unsigned long long)(monotonic_ms() - began));
+    return st;
+}
+
+// After the start command: until the recorder records. The status at the end (1: it records).
+static int wait_record_started(int before) {
+    const uint64_t began = monotonic_ms();
+    int st;
+    for (;;) {
+        st = read_record_status();
+        if (st == 1 || (st >= 3 && st != before) || monotonic_ms() - began >= RECORD_START_WAIT_MS)
+            break;
+        usleep(50 * 1000);
+    }
+    dvr_dbg_log("start: the recorder's status %d after %llu ms", st, (unsigned long long)(monotonic_ms() - began));
+    return st;
 }
 
 void dvr_update_status() {
@@ -120,10 +160,11 @@ void dvr_update_status() {
     if (dvr_is_recording) {
         const int ret = read_record_status();
         if (ret != 1) {
+            LOGW("DVR: the recording ended: the recorder's status %d (%s)", ret, record_status_name(ret));
             dvr_is_recording = false;
             system_script(REC_STOP);
             record_pending = false;
-            wait_record_status(false); // (ripples: sleep(2))
+            wait_record_stopped("stop (the recording ended)"); // (ripples: sleep(2))
         }
     }
     pthread_mutex_unlock(&dvr_mutex);
@@ -695,10 +736,21 @@ bool dvr_cmd(osd_dvr_cmd_t cmd) {
             if (g_sdcard_ready) {
                 dvr_is_recording = true;
                 record_pending = false;
+                // a stop that the recorder has not finished (given up on after RECORD_STOP_WAIT_MS): first
+                int before = read_record_status();
+                if (before == 1)
+                    before = wait_record_stopped("start: the stop before it");
                 usleep(100 * 1000);
                 system_script(REC_START);
                 dvr_recording_start = time(NULL);
-                wait_record_status(true); // (ripples: sleep(2))
+                const int st = wait_record_started(before); // (ripples: sleep(2))
+                if (st != 1) {
+                    // The recorder refused or failed (a card it cannot write, no folder, full): not
+                    // recording. (ripples found out 2 s later, in dvr_update_status().)
+                    LOGW("DVR: the recorder did not start: status %d (%s)", st, record_status_name(st));
+                    dvr_is_recording = false;
+                    system_script(REC_STOP);
+                }
             } else {
                 record_pending = true;
             }
@@ -708,7 +760,7 @@ bool dvr_cmd(osd_dvr_cmd_t cmd) {
             dvr_is_recording = false;
             dvr_dbg_log("stop_request cmd=%d", cmd);
             system_script(REC_STOP);
-            wait_record_status(false); // (ripples: sleep(2))
+            wait_record_stopped("stop"); // (ripples: sleep(2))
         }
     }
 
