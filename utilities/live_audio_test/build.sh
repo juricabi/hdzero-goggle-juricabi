@@ -74,6 +74,9 @@ if [ -n "$TOOLCHAIN" ] && [ -x "$TOOLCHAIN/bin/arm-buildroot-linux-musleabihf-gc
     "$TOOLCHAIN/bin/arm-buildroot-linux-musleabihf-gcc" -static -O1 $W -Isrc/record -o "$BIN/gmsg.arm" "$LAT_DIR/gmsg.c"
 fi
 
+# ---- mono (CLOCK_MONOTONIC, the clock of record_host's log: t_kill.sh) -----------------------
+gcc -O1 $W -o "$BIN/mono" "$LAT_DIR/mono.c"
+
 # ---- ctl_conf (ripples' record control queue, lib/log) ----------------------------------------
 gcc -O1 $W -Ilib/log/include -o "$BIN/ctl_conf" "$LAT_DIR/ctl_conf.c" lib/log/src/record_control.c
 echo "built $BIN/ctl_conf"
