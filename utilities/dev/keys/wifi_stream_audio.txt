@@ -1,0 +1,24 @@
+# Goggle 1, Goggle 2 or BoxPro (ripples-all, WiFi Module page present): 2 s untouched (c00), WiFi Module
+# (k s 10 from the top) > Page: System, the Stream Audio row, clicked (On, not applied), the page left (c09):
+# without Apply Settings nothing is written
+w 2
+c c00
+k s 10
+w 1
+s w00_wifi_preview
+k d
+w 1
+s w01_wifi_basic
+k d
+k d
+w 1
+s w02_wifi_system
+k s 3
+k d
+w 1
+s w03_stream_audio_clicked
+l d
+w 1
+s w04_menu_after_wifi
+c c09
+w 2
