@@ -143,6 +143,10 @@ setup() { # $1 = test dir: fresh root (R) + model (M)
     # the stock device tree: sdc1 (sdmmc, SDIO Wi-Fi) owns PG0-PG5 on every goggle
     for p in 192 193 194; do echo "pin $p (PG$((p - 192))): 4021000.sdmmc (GPIO UNCLAIMED) function sdc1 group PG$((p - 192))" >> "$pm"; done
     echo "pin 225 (PH1): 5001000.uart (GPIO UNCLAIMED) function uart4 group PH1" >> "$pm"
+    echo "pin 226 (PH2): (MUX UNCLAIMED) (GPIO UNCLAIMED)" >> "$pm"
+    echo "pin 227 (PH3): (MUX UNCLAIMED) (GPIO UNCLAIMED)" >> "$pm"
+    mkdir -p "$R/sys/class/sunxi_info"
+    printf 'sunxi_platform    : sun8iw16p1\nsunxi_chipid      : 33806c0014d2c0a8\n' > "$R/sys/class/sunxi_info/sys_info"
     printf 'gpiochip0: GPIOs 0-287, parent: platform/300b000.pinctrl, 300b000.pinctrl:\n gpio-131 (                    |sysfs               ) out lo\n' > "$R/sys/kernel/debug/gpio"
     echo "snd-soc-dummy" > "$R/sys/kernel/debug/asoc/codecs"
     echo "goggle 2 stub" > "$R/mnt/app/version"
@@ -568,9 +572,62 @@ for shn in $SHELLS; do
             need devmem-read-only sh -c "! grep -v -x -e '--list' -e 'devmem 0x0300B0FC 32' '$M/services_busybox'"
             need devmem-agree grep -q "/dev/mem and sunxi_dump agree" "$o"
             need devmem-file-gone test ! -e "$R/tmp/.probe_devmem"
-            verdict "$lbl: probe $md: app runs once, read-only (no SoC write, no FIFO, no 0x17, devmem read only), banks back" "$o"
+            # the verdict for HDMI Out Audio: GO, the marker for this board on the SD card (its only other file)
+            g="$R/mnt/extsd/hdmi_audio_go.txt"
+            need go-verdict grep -q "HDMI Out Audio verdict: GO for board 33806c0014d2c0a8" "$o"
+            need go-marker sh -c "grep -q -x 'hdmi_audio_probe=GO' '$g' && grep -q -x 'board=33806c0014d2c0a8' '$g'"
+            need go-marker-tmp-gone test ! -e "$g.tmp"
+            need only-reports-and-marker sh -c "[ -z \"\$(ls '$R/mnt/extsd' | grep -v -x -e 'hdmi_audio_probe_1.txt' -e 'hdmi_audio_dmesg_1.txt' -e 'hdmi_audio_go.txt' -e 'hdmi_audio_config_1.gz')\" ]"
+            verdict "$lbl: probe $md: app runs once, read-only (no SoC write, no FIFO, no 0x17, devmem read only), banks back, GO marker" "$o"
             stop_apps
         done
+        # NO-GO from what the probe reads (review of phase 3, finding 3): no marker, an earlier GO removed,
+        # the reason in the report; and the board id as the firmware reads it (cpuinfo, unknown)
+        nogo() { # $1 label, $2 expected reason (grep -E), then the model change (sh -c)
+            setup "$T"
+            start_fake_app
+            echo "hdmi_audio_probe=GO" > "$R/mnt/extsd/hdmi_audio_go.txt" # an earlier run's
+            sh -c "$3"
+            env_run "$sh" ssh hdmi_audio_probe.sh
+            o="$R/mnt/extsd/hdmi_audio_probe_1.txt"
+            need nogo grep -q "HDMI Out Audio verdict: NO-GO" "$o"
+            need reason grep -q -E "$2" "$o"
+            need marker-removed test ! -e "$R/mnt/extsd/hdmi_audio_go.txt"
+            need no-soc-write nwrites 0
+            need one-app-running apps_ok 1
+            verdict "$lbl: probe NO-GO, $1: no marker, the reason logged" "$o"
+            stop_apps
+        }
+        nogo "no snddaudio0" "no snddaudio0 sound card" "sed -i '/snddaudio0/d' '$R/proc/asound/cards'"
+        nogo "PH_CFG0 neither value" "PH_CFG0 through sunxi_dump is 0x35517750" "sed -i 's/^0x0300b0fc .*/0x0300b0fc 0x35517750/' '$M/soc'"
+        nogo "PH2 held by another driver" "PH2 held by .*5002000.uart" \
+            "sed -i 's/^pin 226 (PH2): (MUX UNCLAIMED)/pin 226 (PH2): 5002000.uart/' '$R/sys/kernel/debug/pinctrl/300b000.pinctrl/pinmux-pins'"
+        nogo "PH3 a GPIO" "PH3 held by a GPIO user" \
+            "sed -i 's/^pin 227 (PH3): (MUX UNCLAIMED) (GPIO UNCLAIMED)/pin 227 (PH3): (MUX UNCLAIMED) GPIO 300b000.pinctrl:227/' '$R/sys/kernel/debug/pinctrl/300b000.pinctrl/pinmux-pins'"
+        nogo "PH1 by uart3" "PH1 held by .*5000c00.uart" \
+            "sed -i 's/^pin 225 (PH1): 5001000.uart/pin 225 (PH1): 5000c00.uart/' '$R/sys/kernel/debug/pinctrl/300b000.pinctrl/pinmux-pins'"
+        nogo "pinmux-pins not readable" "PH1's owner unknown" "rm -f '$R/sys/kernel/debug/pinctrl/300b000.pinctrl/pinmux-pins'"
+        nogo "/dev/mem differs" "/dev/mem and sunxi_dump differ" "echo 0x35517750 > '$M/devmem_value'"
+        # the board id: cpuinfo's Serial without sys_info; none readable: unknown
+        setup "$T"
+        start_fake_app
+        rm -f "$R/sys/class/sunxi_info/sys_info"
+        printf 'processor\t: 0\nSerial\t\t: 00000000c0ffee12\n' > "$R/proc/cpuinfo"
+        env_run "$sh" ssh hdmi_audio_probe.sh
+        need cpuinfo-serial grep -q -x 'board=00000000c0ffee12' "$R/mnt/extsd/hdmi_audio_go.txt"
+        printf 'Serial\t\t: 0000000000000000\n' > "$R/proc/cpuinfo"
+        rm -f "$R/mnt/extsd/"hdmi_audio_*
+        env_run "$sh" ssh hdmi_audio_probe.sh
+        need unknown grep -q -x 'board=unknown' "$R/mnt/extsd/hdmi_audio_go.txt"
+        verdict "$lbl: probe GO marker: the board id from cpuinfo, else unknown (as hdmi_boot.c reads it)" "$R/mnt/extsd/hdmi_audio_probe_1.txt"
+        stop_apps
+        # the SD card not writable: GO said, the marker not written, nothing else written
+        setup "$T"
+        start_fake_app
+        PROBE_OUTDIR=/proc env_run "$sh" ssh hdmi_audio_probe.sh
+        need not-written test ! -e "$R/mnt/extsd/hdmi_audio_go.txt"
+        verdict "$lbl: probe with no writable SD card: no marker" /dev/null
+        stop_apps
         # no services busybox: /dev/mem is not read, the rest runs as before
         setup "$T"
         rm -f "$R/mnt/app/services/busybox/busybox"

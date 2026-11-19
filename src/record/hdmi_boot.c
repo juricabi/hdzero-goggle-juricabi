@@ -25,7 +25,8 @@ void hb_test_checkpoint(int n);
 #define HB_N(a)       ((int)(sizeof(a) / sizeof((a)[0])))
 
 static const char *const hb_pins_name[] = {"untouched", "stock", "audio", "other", "unknown"};
-static const char *const hb_fault_name[] = {"", HDMI_AUDIO_FAULT_PINS, HDMI_AUDIO_FAULT_CHIP, HDMI_AUDIO_FAULT_PATH};
+static const char *const hb_fault_name[] = {"", HDMI_AUDIO_FAULT_PINS, HDMI_AUDIO_FAULT_CHIP, HDMI_AUDIO_FAULT_PATH,
+                                            HDMI_AUDIO_FAULT_PROBE};
 static const char *const hb_rec_name[] = {"valid", "missing", "from another boot", "unreadable or inconsistent"};
 
 const char *hdmi_boot_fault_text(hb_fault_t f) {
@@ -47,6 +48,136 @@ bool hdmi_boot_setting_is_1(const char *setting_ini, const char *key) {
     if (setting_ini == NULL || ini_gets("hdmi", key, "", v, (int)sizeof(v), setting_ini) <= 0)
         return false;
     return strcmp(v, "1") == 0; // "01", "true", "2", "1x", "" ... are all off
+}
+
+/* ---- the probe's GO marker ---- */
+#define HB_MARKER_MAX 1024
+
+// a whole small text file, NUL-terminated; -1: missing (errno ENOENT) or unreadable, -2: too long
+static int hb_read_file(const char *path, char *buf, size_t size) {
+    size_t len = 0;
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    for (;;) {
+        ssize_t r = read(fd, buf + len, size - 1 - len);
+        if (r < 0 && errno == EINTR)
+            continue;
+        if (r <= 0)
+            break;
+        len += (size_t)r;
+        if (len >= size - 1)
+            break;
+    }
+    close(fd);
+    buf[len] = 0;
+    return len >= size - 1 ? -2 : (int)len;
+}
+
+// "key : value" lines (sys_info, cpuinfo): the value of `key` (spaces and tabs in the key ignored, the
+// value's ends trimmed) if it is 1..64 letters and digits and not all zeros
+static bool hb_id_from(const char *path, const char *key, char *id, size_t len) {
+    char buf[8192];
+    if (hb_read_file(path, buf, sizeof(buf)) < 0)
+        return false;
+    for (char *line = buf; line && *line;) {
+        char *nl = strchr(line, '\n');
+        if (nl)
+            *nl = 0;
+        char *colon = strchr(line, ':');
+        if (colon) {
+            char k[64];
+            size_t n = 0;
+            for (const char *p = line; p < colon && n < sizeof(k) - 1; p++)
+                if (*p != ' ' && *p != '\t')
+                    k[n++] = *p;
+            k[n] = 0;
+            char *v = colon + 1;
+            while (*v == ' ' || *v == '\t')
+                v++;
+            size_t vl = strlen(v);
+            while (vl > 0 && (v[vl - 1] == ' ' || v[vl - 1] == '\t' || v[vl - 1] == '\r'))
+                v[--vl] = 0;
+            if (strcmp(k, key) == 0) {
+                bool ok = vl >= 1 && vl <= 64 && vl < len, zero = true;
+                for (size_t i = 0; ok && i < vl; i++) {
+                    const char c = v[i];
+                    ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+                    zero &= c == '0';
+                }
+                if (ok && !zero) {
+                    memcpy(id, v, vl + 1);
+                    return true;
+                }
+                return false; // (the first line of that key counts, as in the probe)
+            }
+        }
+        line = nl ? nl + 1 : NULL;
+    }
+    return false;
+}
+
+void hdmi_boot_board_id(char *id, size_t len) {
+    if (!hb_id_from(HDMIA_BOARD_INFO_FILE, "sunxi_chipid", id, len) &&
+        !hb_id_from(HDMIA_BOARD_INFO_FILE, "sunxi_serial", id, len) &&
+        !hb_id_from(HDMIA_CPUINFO_FILE, "Serial", id, len))
+        snprintf(id, len, "unknown");
+}
+
+hb_probe_t hdmi_boot_probe(char *why, size_t wlen) {
+    char buf[HB_MARKER_MAX + 2], board[72], go[16] = "", mark[72] = "";
+    char dummy[8];
+    if (why == NULL) {
+        why = dummy;
+        wlen = sizeof(dummy);
+    }
+    const int len = hb_read_file(HDMIA_PROBE_GO_FILE, buf, sizeof(buf));
+    if (len < 0 && len != -2 && errno == ENOENT) {
+        snprintf(why, wlen, "no GO of the HDMI audio probe (%s)", HDMIA_PROBE_GO_FILE);
+        return HB_PROBE_MISSING;
+    }
+    if (len <= 0 || buf[len - 1] != '\n' || strlen(buf) != (size_t)len) {
+        snprintf(why, wlen, "the probe's marker is unreadable, empty, too long or cut short");
+        return HB_PROBE_INVALID;
+    }
+    // key=value lines; hdmi_audio_probe and board exactly once each, every line printable
+    int n_go = 0, n_board = 0;
+    for (char *line = buf; *line;) {
+        char *nl = strchr(line, '\n');
+        *nl = 0;
+        char *eq = strchr(line, '=');
+        for (const char *p = line; *p; p++)
+            if (*p < 0x20 || *p > 0x7e)
+                eq = NULL;
+        if (eq == NULL) {
+            snprintf(why, wlen, "the probe's marker has a line that is not key=value");
+            return HB_PROBE_INVALID;
+        }
+        *eq = 0;
+        if (strcmp(line, "hdmi_audio_probe") == 0) {
+            n_go++;
+            snprintf(go, sizeof(go), "%.15s", eq + 1);
+        } else if (strcmp(line, "board") == 0) {
+            n_board++;
+            snprintf(mark, sizeof(mark), "%.71s", eq + 1);
+        }
+        line = nl + 1;
+    }
+    if (n_go != 1 || n_board != 1) {
+        snprintf(why, wlen, "the probe's marker lacks or repeats hdmi_audio_probe= / board=");
+        return HB_PROBE_INVALID;
+    }
+    if (strcmp(go, "GO") != 0) {
+        snprintf(why, wlen, "the HDMI audio probe said %s", go);
+        return HB_PROBE_NOT_GO;
+    }
+    hdmi_boot_board_id(board, sizeof(board));
+    if (strcmp(mark, board) != 0) {
+        snprintf(why, wlen, "the probe's GO is for board %.20s, this is %.20s", mark, board);
+        return HB_PROBE_OTHER_BOARD;
+    }
+    snprintf(why, wlen, "GO of the HDMI audio probe for board %.20s", board);
+    return HB_PROBE_GO;
 }
 
 hb_pins_t hdmi_boot_ph_state(uint32_t v) {
@@ -142,8 +273,10 @@ static bool hb_consistent(const hdmi_boot_t *b) {
     if (!b->out)
         return b->pins == HB_PINS_UNTOUCHED && b->fault == HB_FAULT_NONE;
     switch (b->pins) {
+    case HB_PINS_UNTOUCHED: // refused without the probe's GO: PH_CFG0 neither read nor written
+        return !b->ph_valid && b->fault == HB_FAULT_PROBE;
     case HB_PINS_AUDIO: // switched; a later fault (chip, path) may have turned HDMI out audio off since
-        return b->ph_valid && b->ph_cfg0 == HB_PH_AUDIO && b->fault != HB_FAULT_PINS;
+        return b->ph_valid && b->ph_cfg0 == HB_PH_AUDIO && b->fault != HB_FAULT_PINS && b->fault != HB_FAULT_PROBE;
     case HB_PINS_STOCK:
         return b->ph_valid && b->ph_cfg0 == HB_PH_STOCK && b->fault == HB_FAULT_PINS;
     case HB_PINS_OTHER:
@@ -368,6 +501,13 @@ int hdmi_boot_run(const char *setting_ini) {
     b.in = hdmi_boot_setting_is_1(setting_ini, "audio_in");
     if (!b.out) {
         hb_detail(&b, "audio_out is not 1: PH_CFG0 not read, not written");
+        return hb_finish(&b);
+    }
+    // the read-only probe must have found this board's SoC side as expected (docs/hdmi-audio.md, 7)
+    char why[96];
+    if (hdmi_boot_probe(why, sizeof(why)) != HB_PROBE_GO) {
+        b.fault = HB_FAULT_PROBE;
+        hb_detail(&b, "run hdmi_audio_probe.sh first, PH_CFG0 not read or written: %s", why);
         return hb_finish(&b);
     }
     if (st == HB_REC_CORRUPT) { // a record nobody can date: do nothing this boot

@@ -76,6 +76,14 @@ typedef enum {
 #define HDMIA_BOOT_FILE    "/tmp/hdmi_audio.boot"
 #define HDMIA_BOOT_ID_FILE "/proc/sys/kernel/random/boot_id"
 #endif
+/* HDMIA_PROBE_GO_FILE  the read-only probe's GO for this board (utilities/probe/hdmi_audio_probe.sh writes
+ *                      it on the SD card, and removes it on NO-GO): HDMI Out Audio needs it
+ * HDMIA_BOARD_INFO_FILE, HDMIA_CPUINFO_FILE  where this board's id is read (src/record/hdmi_boot.c) */
+#ifndef HDMIA_PROBE_GO_FILE /* host tests put them elsewhere */
+#define HDMIA_PROBE_GO_FILE   "/mnt/extsd/hdmi_audio_go.txt"
+#define HDMIA_BOARD_INFO_FILE "/sys/class/sunxi_info/sys_info"
+#define HDMIA_CPUINFO_FILE    "/proc/cpuinfo"
+#endif
 
 /** @} */
 

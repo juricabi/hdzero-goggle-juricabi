@@ -27,6 +27,10 @@
  *   audio_out=0|1  audio_in=0|1  (the settings at boot, 1 = exactly "1")
  *   pins=untouched|stock|audio|other|unknown  fault=<"" or one of the HDMI_AUDIO_FAULT_*>
  *   ph_cfg0=<last verified value or "">  detail=<one line for the log>
+ * HDMI Out Audio also needs the GO of the read-only probe for this board (HDMIA_PROBE_GO_FILE on the
+ * SD card, written only by utilities/probe/hdmi_audio_probe.sh, hdmi_boot_probe()): without it the
+ * boot step refuses audio_out=1 with the fault "probe not run" and neither reads nor writes PH_CFG0
+ * (pins=untouched). docs/hdmi-audio.md, section 7.
  * It is valid only for the boot whose boot id it carries and only if every line checks out;
  * anything else counts as "no decision" (HDMI audio off). The app (src/core/hdmi_audio.c)
  * and the record daemon (pcmbridge.c) read it.
@@ -36,6 +40,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // PH_CFG0 (PIO base 0x0300B000 + port H 7 * 0x24); fields of 4 bits, PH0 in bits 3:0
@@ -49,11 +54,14 @@ extern "C" {
 #define HDMI_AUDIO_FAULT_PINS "pin check failed"
 #define HDMI_AUDIO_FAULT_CHIP "HDMI chip check failed"
 #define HDMI_AUDIO_FAULT_PATH "audio path failed"
+#define HDMI_AUDIO_FAULT_PROBE "probe not run"
 
 typedef enum { HB_PHASE_CHECK = 1, HB_PHASE_DONE = 2 } hb_phase_t;
 typedef enum { HB_PINS_UNTOUCHED = 0, HB_PINS_STOCK, HB_PINS_AUDIO, HB_PINS_OTHER, HB_PINS_UNKNOWN } hb_pins_t;
 typedef enum { HB_REC_OK = 0, HB_REC_MISSING, HB_REC_STALE, HB_REC_CORRUPT } hb_rec_t;
-typedef enum { HB_FAULT_NONE = 0, HB_FAULT_PINS, HB_FAULT_CHIP, HB_FAULT_PATH } hb_fault_t;
+typedef enum { HB_FAULT_NONE = 0, HB_FAULT_PINS, HB_FAULT_CHIP, HB_FAULT_PATH, HB_FAULT_PROBE } hb_fault_t;
+// the probe's marker (HDMIA_PROBE_GO_FILE) for this board
+typedef enum { HB_PROBE_GO = 0, HB_PROBE_MISSING, HB_PROBE_NOT_GO, HB_PROBE_OTHER_BOARD, HB_PROBE_INVALID } hb_probe_t;
 
 typedef struct {
     char boot_id[40];
@@ -71,6 +79,11 @@ typedef struct {
 const char *hdmi_boot_fault_text(hb_fault_t f); // NULL for HB_FAULT_NONE, else HDMI_AUDIO_FAULT_*
 
 bool hdmi_boot_supported(void); // HDMI audio on this target (Goggle 1, Goggle 2, BoxPro; no other)
+// This board's id as the probe writes it into its marker: the first of sys_info's sunxi_chipid and
+// sunxi_serial and cpuinfo's Serial that is 1..64 letters and digits and not all zeros, else "unknown"
+void hdmi_boot_board_id(char *id, size_t len);
+// The probe's marker: GO for this board? (read only; `why` gets a line for the log, may be NULL)
+hb_probe_t hdmi_boot_probe(char *why, size_t len);
 // [hdmi] <key> in setting.ini is exactly "1" (as minIni reads it: spaces and a trailing comment
 // removed); any other value, a missing key or an unreadable file is false
 bool hdmi_boot_setting_is_1(const char *setting_ini, const char *key);

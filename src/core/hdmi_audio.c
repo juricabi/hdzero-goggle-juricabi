@@ -125,6 +125,17 @@ void hdmi_audio_load(void) {
              act_out, act_in, out_fault ? ", fault: " : "", out_fault ? hdmi_boot_fault_text(out_fault) : "");
 }
 
+bool hdmi_audio_out_allowed(void) {
+    char why[96];
+    const bool go = hdmi_boot_probe(why, sizeof(why)) == HB_PROBE_GO;
+    static int logged = -1;
+    if (logged != go) { // (once per change: the page asks on every redraw)
+        LOGI("hdmi audio: HDMI Out Audio %s: %s", go ? "may be switched on" : "stays off", why);
+        logged = go;
+    }
+    return go;
+}
+
 bool hdmi_audio_supported(void) {
     return hdmi_boot_supported();
 }

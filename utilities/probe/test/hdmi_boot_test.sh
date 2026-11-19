@@ -13,6 +13,9 @@
 #  - killed (SIGKILL) at every point of the boot step and of the recovery: the next app start
 #    ends with PH_CFG0 = stock (fault) or = I2S0 and HDMI audio on, never anything else;
 #  - later faults (HDMI chip, audio path) keep HDMI out audio off across app restarts;
+#  - HDMI out audio needs the read-only probe's GO for this board (its marker on the SD card): no
+#    marker, NO-GO, another board's, or a malformed one: refused, no sunxi_dump access, "probe not run";
+#    the board id as the probe reads it (sys_info sunxi_chipid / sunxi_serial, cpuinfo Serial, unknown);
 #  - system_exec_sunxi_dump(): runs under the lock; a held lock delays it at most ~1 s, then
 #    it runs anyway; within 10 s it does not wait again.
 # SRC_TOP=<tree>: test another copy of the sources (test/c_mutants.sh uses it).
@@ -118,16 +121,21 @@ int t_flock(int fd, int op) { return flock(fd, op); }
 const char *fs_basename(const char *p) { const char *s = strrchr(p, '/'); return s ? s + 1 : p; }
 
 /* ---- files ---- */
-static char P_SET[512], P_BOOT[512], P_ID[512], P_LOCK[512];
+static char P_SET[512], P_BOOT[512], P_ID[512], P_LOCK[512], P_GO[512], P_SYSINFO[512], P_CPUINFO[512];
 static void put(const char *f, const char *s) { FILE *o = fopen(f, "w"); fputs(s, o); fclose(o); }
 static void new_boot(int n) { // rc.sh: stock PH_CFG0; a new boot id
     char id[64]; snprintf(id, sizeof(id), "%08x-1234-4abc-8def-0123456789%02x\n", 0x5eed0000u + (unsigned)n, n & 0xff);
     put(P_ID, id);
     M->ph = 0x35517751u;
 }
+static const char *GO = "hdmi_audio_probe=GO\nboard=1a2b3c4d5e6f\nprobe_version=4\nph_cfg0=0x35517751\n";
 static void reset(const char *setting, const char *mutate) {
     memset(M, 0, sizeof(*M)); M->stick = 1; M->ph = 0x35517751u;
     unlink(P_BOOT);
+    // this board (sys_info) and the probe's GO for it on the SD card
+    put(P_SYSINFO, "sunxi_platform    : sun8iw16p1\nsunxi_secure      : normal\nsunxi_chipid      : 1a2b3c4d5e6f\nsunxi_chiptype    : 00000000\n");
+    unlink(P_CPUINFO);
+    put(P_GO, GO);
     if (setting) put(P_SET, setting); else unlink(P_SET);
     (void)mutate;
 }
@@ -157,6 +165,9 @@ int main(int argc, char **argv) {
     snprintf(P_BOOT, sizeof(P_BOOT), "%s/boot", DIR_);
     snprintf(P_ID, sizeof(P_ID), "%s/boot_id", DIR_);
     snprintf(P_LOCK, sizeof(P_LOCK), "%s/lock", DIR_);
+    snprintf(P_GO, sizeof(P_GO), "%s/go", DIR_);
+    snprintf(P_SYSINFO, sizeof(P_SYSINFO), "%s/sys_info", DIR_);
+    snprintf(P_CPUINFO, sizeof(P_CPUINFO), "%s/cpuinfo", DIR_);
     M = mmap(NULL, sizeof(*M), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     hdmi_boot_t b;
     new_boot(1);
@@ -344,6 +355,73 @@ int main(int argc, char **argv) {
     CHECK(strcmp(hdmi_boot_fault_text(HB_FAULT_PINS), "pin check failed") == 0 && strcmp(hdmi_boot_fault_text(HB_FAULT_CHIP), "HDMI chip check failed") == 0 &&
           strcmp(hdmi_boot_fault_text(HB_FAULT_PATH), "audio path failed") == 0 && hdmi_boot_fault_text(HB_FAULT_NONE) == NULL, "fault texts");
 
+    /* 9a. the read-only probe's GO for this board (review of phase 3, finding 3) */
+    {
+        static const struct { const char *marker; hb_probe_t want; const char *what; } gate[] = {
+            {NULL, HB_PROBE_MISSING, "no marker"},
+            {"hdmi_audio_probe=NO-GO\nboard=1a2b3c4d5e6f\n", HB_PROBE_NOT_GO, "NO-GO"},
+            {"hdmi_audio_probe=GO\nboard=99887766\n", HB_PROBE_OTHER_BOARD, "another board's GO"},
+            {"hdmi_audio_probe=GO\nboard=unknown\n", HB_PROBE_OTHER_BOARD, "a GO for an unknown board, this one has an id"},
+            {"hdmi_audio_probe=GO\n", HB_PROBE_INVALID, "no board line"},
+            {"board=1a2b3c4d5e6f\n", HB_PROBE_INVALID, "no verdict line"},
+            {"hdmi_audio_probe=GO\nboard=1a2b3c4d5e6f\nhdmi_audio_probe=GO\n", HB_PROBE_INVALID, "a repeated line"},
+            {"hdmi_audio_probe=GO\nboard=1a2b3c4d5e6f", HB_PROBE_INVALID, "cut short (no final newline)"},
+            {"hdmi_audio_probe=GO\nboard=1a2b3c4d5e6f\njunk\n", HB_PROBE_INVALID, "a line that is not key=value"},
+            {"hdmi_audio_probe=GO\nboard=1a2b3c4d5e6f\nnote=\x01\n", HB_PROBE_INVALID, "a control character"},
+            {"", HB_PROBE_INVALID, "empty"},
+            {"hdmi_audio_probe=go\nboard=1a2b3c4d5e6f\n", HB_PROBE_NOT_GO, "'go' is not GO"},
+            {"hdmi_audio_probe=GO \nboard=1a2b3c4d5e6f\n", HB_PROBE_NOT_GO, "'GO ' is not GO"},
+        };
+        for (unsigned i = 0; i < sizeof(gate) / sizeof(gate[0]); i++) {
+            reset(ON, NULL); new_boot(1);
+            if (gate[i].marker) put(P_GO, gate[i].marker); else unlink(P_GO);
+            hb_probe_t pr = hdmi_boot_probe(NULL, 0);
+            do_boot(); app(true);
+            CHECK(pr == gate[i].want && M->node_opens == 0 && M->ph == 0x35517751u && rec(&b) == HB_REC_OK && b.out && b.pins == HB_PINS_UNTOUCHED &&
+                  b.fault == HB_FAULT_PROBE && strstr(b.detail, "hdmi_audio_probe.sh") && !A_out && A_fault == HB_FAULT_PROBE && !hdmi_boot_out_ready(),
+                  "probe marker: %s: refused, no sunxi_dump access, 'probe not run' (%s)", gate[i].what, b.detail);
+        }
+        { char big[1100]; memset(big, 'x', sizeof(big) - 2); memcpy(big, "note=", 5); big[sizeof(big) - 2] = '\n'; big[sizeof(big) - 1] = 0;
+          char txt[1300]; snprintf(txt, sizeof(txt), "%s%s", GO, big);
+          reset(ON, NULL); new_boot(1); put(P_GO, txt); do_boot(); app(true);
+          CHECK(hdmi_boot_probe(NULL, 0) == HB_PROBE_INVALID && M->node_opens == 0 && A_fault == HB_FAULT_PROBE, "probe marker: too long: refused"); }
+        // the GO opens the gate: the switch as in 2.
+        reset(ON, NULL); new_boot(1); do_boot(); app(true);
+        CHECK(hdmi_boot_probe(NULL, 0) == HB_PROBE_GO && M->ph == 0x35513331u && M->ph_writes == 1 && A_out, "probe marker: GO for this board: switched");
+        // removed after the boot step: what is in effect stays for this boot (boot-only), the page refuses a new On
+        unlink(P_GO); app(true);
+        CHECK(A_out && hdmi_boot_probe(NULL, 0) == HB_PROBE_MISSING, "probe marker removed after the boot: on for this boot, the next boot refuses");
+        // the board id as the probe reads it
+        static const struct { const char *sysinfo, *cpuinfo, *want; } ids[] = {
+            {"sunxi_chipid : 1a2b3c4d5e6f\n", NULL, "1a2b3c4d5e6f"},
+            {"sunxi_chipid\t:\t1A2B\r\nsunxi_serial : 77\n", NULL, "1A2B"},
+            {"sunxi_chipid : 00000000\nsunxi_serial : 0123abcd\n", "Serial\t\t: 4455\n", "0123abcd"},
+            {"sunxi_chipid : 12:34\n", "Serial\t\t: 00000000aabbccdd\n", "00000000aabbccdd"},
+            {NULL, "processor\t: 0\nSerial\t\t: 0000000000000000\n", "unknown"},
+            {NULL, NULL, "unknown"},
+            {"sunxi_chipid : 1234567890123456789012345678901234567890123456789012345678901234567890\n", NULL, "unknown"},
+            {"sunxi_chip id : abc\n", NULL, "abc"},
+        };
+        for (unsigned i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+            char id[72];
+            if (ids[i].sysinfo) put(P_SYSINFO, ids[i].sysinfo); else unlink(P_SYSINFO);
+            if (ids[i].cpuinfo) put(P_CPUINFO, ids[i].cpuinfo); else unlink(P_CPUINFO);
+            hdmi_boot_board_id(id, sizeof(id));
+            CHECK(strcmp(id, ids[i].want) == 0, "board id #%u: %s (want %s)", i, id, ids[i].want);
+        }
+        // a board without a readable id: a GO for "unknown" counts
+        reset(ON, NULL); new_boot(1); unlink(P_SYSINFO); put(P_GO, "hdmi_audio_probe=GO\nboard=unknown\n"); do_boot(); app(true);
+        CHECK(A_out && M->ph_writes == 1, "no board id readable: a GO for 'unknown': switched");
+        CHECK(strcmp(hdmi_boot_fault_text(HB_FAULT_PROBE), "probe not run") == 0, "fault text: probe not run");
+        // a record that says "refused without the probe" in any other way is not consistent
+        char id[64] = "", txt[600];
+        reset(ON, NULL); new_boot(1);
+        FILE *f = fopen(P_ID, "r"); if (fgets(id, sizeof(id), f)) id[strcspn(id, "\n")] = 0; fclose(f);
+        snprintf(txt, sizeof(txt), "version=1\nboot_id=%s\nphase=done\nsupported=1\naudio_out=1\naudio_in=0\npins=audio\nfault=probe not run\nph_cfg0=0x35513331\ndetail=x\n", id);
+        M->ph = 0x35513331u; put(P_BOOT, txt); app(true);
+        CHECK(rec(&b) != HB_REC_OK && !A_out, "a record with pins=audio and 'probe not run': not consistent, off");
+    }
+
     /* 9. system_exec_sunxi_dump(): under the lock; a held lock costs at most ~1 s, then once per 10 s */
     {
         char cmd[1200];
@@ -368,7 +446,7 @@ C
 
 mk() { # $1 output, $2 target macro
     # shellcheck disable=SC2089,SC2090 # the quotes are part of the macro values
-    D="-DHDMIA_REQ_FILE=\"$T/run/req\" -DHDMIA_STATE_FILE=\"$T/run/state\" -DHDMIA_LOCK_FILE=\"$T/run/lock\" -DHDMIA_BOOT_FILE=\"$T/run/boot\" -DHDMIA_BOOT_ID_FILE=\"$T/run/boot_id\""
+    D="-DHDMIA_REQ_FILE=\"$T/run/req\" -DHDMIA_STATE_FILE=\"$T/run/state\" -DHDMIA_LOCK_FILE=\"$T/run/lock\" -DHDMIA_BOOT_FILE=\"$T/run/boot\" -DHDMIA_BOOT_ID_FILE=\"$T/run/boot_id\" -DHDMIA_PROBE_GO_FILE=\"$T/run/go\" -DHDMIA_BOARD_INFO_FILE=\"$T/run/sys_info\" -DHDMIA_CPUINFO_FILE=\"$T/run/cpuinfo\""
     W="-Dopen=t_open -Dread=t_read -Dwrite=t_write -Dclose=t_close -Dflock=t_flock"
     # shellcheck disable=SC2086,SC2090 # D and W hold several options
     gcc -Wall -Wextra -Wno-unused-parameter -Werror -c -I"$T/inc" -I"$T/inc/record" $D $W -DHB_TEST "-D$2" -o "$T/hb.o" "$T/inc/record/hdmi_boot.c"
@@ -418,7 +496,7 @@ mkdir -p "$T/run"
 printf '[hdmi]\naudio_out=1\naudio_in=1\n' > "$T/run/setting.ini"
 echo "5eed0001-1234-4abc-8def-012345678901" > "$T/run/boot_id"
 # shellcheck disable=SC2089,SC2090
-D="-DHDMIA_REQ_FILE=\"$T/run/req\" -DHDMIA_STATE_FILE=\"$T/run/state\" -DHDMIA_LOCK_FILE=\"$T/run/lock\" -DHDMIA_BOOT_FILE=\"$T/run/boot\" -DHDMIA_BOOT_ID_FILE=\"$T/run/boot_id\""
+D="-DHDMIA_REQ_FILE=\"$T/run/req\" -DHDMIA_STATE_FILE=\"$T/run/state\" -DHDMIA_LOCK_FILE=\"$T/run/lock\" -DHDMIA_BOOT_FILE=\"$T/run/boot\" -DHDMIA_BOOT_ID_FILE=\"$T/run/boot_id\" -DHDMIA_PROBE_GO_FILE=\"$T/run/go\" -DHDMIA_BOARD_INFO_FILE=\"$T/run/sys_info\" -DHDMIA_CPUINFO_FILE=\"$T/run/cpuinfo\""
 # no target macro; the real sysfs nodes do not exist on a PC: any access would fail this run (it must make none)
 # shellcheck disable=SC2086,SC2090
 gcc -Wall -Werror -I"$T/inc" $D -o "$T/nt" "$T/notarget.c" "$T/inc/record/hdmi_boot.c" "$T/inc/record/soc_reg.c" "$T/minIni.o"
