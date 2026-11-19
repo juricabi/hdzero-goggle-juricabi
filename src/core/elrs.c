@@ -374,18 +374,41 @@ void esp32_handler_timeout() {
     }
 }
 
+// The analog channel (1..48) of the answers to MSP_GET_BAND_CHAN / MSP_GET_FREQ: a bay module's own
+// channel while the goggle tunes it (src/module/module.h), otherwise the stored one, as ripples
+// answered. (For a bay or Expansion module the goggle does not control, Goggle 1 Module None or Goggle 2
+// Expansion, that is the channel last tuned here, not necessarily the module's: ripples' answer.)
+static uint8_t msp_analog_channel(void) {
+    return analog_channel_tunable() ? (uint8_t)analog_channel_get() : g_setting.source.analog_channel;
+}
+
+// MSP_GET_BAND_CHAN: the channel index of the source (0 for one without a channel)
+static uint8_t msp_band_chan_answer(void) {
+    uint8_t chan = 0;
+    if (g_source_info.source == SOURCE_HDZERO) {
+        chan = hdz_ch2index(g_setting.source.hdzero_band, g_setting.scan.channel);
+    } else if (g_source_info.source == SOURCE_AV_MODULE) {
+        chan = msp_analog_channel() - 1;
+    }
+    return chan;
+}
+
+// MSP_GET_FREQ: the frequency in MHz of the source's channel (0 for one without a channel)
+static uint16_t msp_freq_answer(void) {
+    uint8_t ch = 0;
+    if (g_source_info.source == SOURCE_HDZERO) {
+        ch = hdz_ch2index(g_setting.source.hdzero_band, g_setting.scan.channel) + 1;
+    } else if (g_source_info.source == SOURCE_AV_MODULE) {
+        ch = msp_analog_channel();
+    }
+    return ch == 0 ? 0 : freq_table[ch - 1];
+}
+
 void msp_process_packet() {
     if (packet.type == MSP_PACKET_COMMAND) {
         switch (packet.function) {
         case MSP_GET_BAND_CHAN: {
-            uint8_t chan = 0;
-            if (g_source_info.source == SOURCE_HDZERO) {
-                chan = hdz_ch2index(g_setting.source.hdzero_band, g_setting.scan.channel);
-            } else if (g_source_info.source == SOURCE_AV_MODULE) {
-                // 255 (the backpack's CHANNEL_INDEX_UNKNOWN) for a bay module the goggle
-                // does not control: its channel is not known
-                chan = analog_channel_tunable() ? (uint8_t)(analog_channel_get() - 1) : 255;
-            }
+            uint8_t chan = msp_band_chan_answer();
             msp_send_packet(MSP_GET_BAND_CHAN, MSP_PACKET_RESPONSE, 1, &chan);
         } break;
         case MSP_SET_BAND_CHAN: {
@@ -427,15 +450,8 @@ void msp_process_packet() {
             }
         } break;
         case MSP_GET_FREQ: {
-            uint8_t ch = 0;
-            uint16_t freq;
+            uint16_t const freq = msp_freq_answer();
             uint8_t buf[2];
-            if (g_source_info.source == SOURCE_HDZERO) {
-                ch = hdz_ch2index(g_setting.source.hdzero_band, g_setting.scan.channel) + 1;
-            } else if (g_source_info.source == SOURCE_AV_MODULE) {
-                ch = analog_channel_tunable() ? analog_channel_get() : 0; // 0: unknown
-            }
-            freq = ch == 0 ? 0 : freq_table[ch - 1];
             buf[0] = freq & 0xff;
             buf[1] = freq >> 8;
             msp_send_packet(MSP_GET_FREQ, MSP_PACKET_RESPONSE, sizeof(buf), buf);

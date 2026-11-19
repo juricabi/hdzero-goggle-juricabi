@@ -45,7 +45,11 @@ $(OUT)/test_settings_module: test_settings_module.c $(ROOT)/src/core/settings.c 
 	$(CC) $(SETTINGS_CFLAGS) $(WARN) -c -o $(OUT)/test_settings_module.o test_settings_module.c
 	$(CC) $(SETTINGS_CFLAGS) -o $@ $(OUT)/test_settings_module.o $(ROOT)/src/core/settings.c $(ROOT)/lib/minIni/src/minIni.c
 
+# the answers to the backpack's MSP channel queries (src/core/elrs.c), compiled on their own
+ELRS ?= $(ROOT)/src/core/elrs.c
+
 test: $(OUT)/test_module_worker $(OUT)/test_module_types $(OUT)/test_settings_module $(OUT)/test_softspi
+	python3 test_msp_answers.py $(ELRS)
 	$(OUT)/test_softspi
 	$(OUT)/test_settings_module
 	$(OUT)/test_module_worker
