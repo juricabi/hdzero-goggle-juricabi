@@ -3,9 +3,9 @@
 # namespace with a private /tmp: the tests compile production code (dvr.c, hardware-*.c, ...) with stubs, and
 # whatever a stub misses can reach neither the host's devices nor its files.  Run as root.
 #   utilities/dev/run_ripples_tests.sh            (logs: $TEST_OUT/ripples_tests, default /root/hdz/test-out)
-# One line per test: "<name>: rc <exit status>".  test/record's "run" and "run_record_control" also build
-# test_dvr_naming, which does not compile on glibc (its statfs() macro meets <sys/statfs.h>): the two record
-# tests that build on their own are run separately as well.
+# One line per test: "<name>: rc <exit status>".  ripples 1.2.2's tests (the base since juricabi.2) and
+# juricabi's test/dvr.  test/record's "run" also builds test_dvr_naming, which does not compile on glibc (its
+# statfs() macro meets <sys/statfs.h>): test_avshare_reset, which builds on its own, is run separately as well.
 set -u
 WT=$(cd "$(dirname "$0")/../.." && pwd)
 LOGD=${TEST_OUT:-/root/hdz/test-out}/ripples_tests
@@ -24,10 +24,8 @@ for T in HDZGOGGLE HDZGOGGLE2 HDZBOXPRO; do t hdmi_$T make -C test/hdmi run TARG
 t ht make -C test/ht run
 for T in HDZGOGGLE HDZGOGGLE2 HDZBOXPRO; do t motion_$T make -C test/motion run TARGET=$T; done
 t record make -C test/record run
-t record_trace make -C test/record run_dvr_trace
-t record_control make -C test/record run_record_control
 t record_avshare_only bash -c 'cd test/record && make test_avshare_reset && ./test_avshare_reset'
-t record_control_only bash -c 'cd test/record && make test_record_control && ./test_record_control'
+t dvr_auto make -C test/dvr run
 t screen make -C test/screen run
 t sleep make -C test/sleep run
 t video make -C test/video run
