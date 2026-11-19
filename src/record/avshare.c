@@ -512,7 +512,16 @@ void avshare_reset(void) {
     // A live encoder restart begins a new H.264 stream with fresh SPS/PPS and
     // an IDR. Discard every chunk from the previous encoder instance so the
     // RTSP reader cannot concatenate the two bitstream epochs.
-    avshare_flush();
+    // ripples-all: only the video side. The stream audio (live_audio.c) writes the audio side from its
+    // own thread through the pause and the resume, and its bitstream has no new epoch: flushing it
+    // here threw its queued frames away and raced with that writer (idxNext, slot flags).
+    if (gAvshare.bufShare != NULL) {
+        const int v = MEDIA_type2index(MEDIA_VIDEO);
+        for (int j = 0; j < SHAREBUF_COUNT; j++) {
+            gAvshare.bufStreamHead[v][j].wflag = 1;
+        }
+        gAvshare.idxNext[v] = 0;
+    }
 
 #if (SAVE_FILE_TEST)
     if (gAvshare.fileTest != NULL) {

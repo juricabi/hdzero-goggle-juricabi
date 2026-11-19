@@ -29,14 +29,21 @@ int main(void) {
 
     avshare_reset();
 
+    // ripples-all: the reset is for the new video bitstream; the stream audio's side of the ring (written
+    // by its own thread through the pause) is not touched
+    const int video = MEDIA_type2index(MEDIA_VIDEO);
+    const int audio = MEDIA_type2index(MEDIA_AUDIO);
+    check(gAvshare.idxNext[video] == 0, "reset must rewind the writer ring");
+    for (int slot = 0; slot < SHAREBUF_COUNT; slot++) {
+        check(gAvshare.bufStreamHead[video][slot].wflag == 1,
+              "reset must discard every queued stream chunk");
+        check(gAvshare.bufStreamHead[audio][slot].wflag == 0,
+              "reset must leave the audio chunks (ripples-all: the stream audio runs on)");
+    }
+    check(gAvshare.idxNext[audio] == 17 + audio, "reset must leave the audio writer's position");
     for (int media = 0; media < MEDIA_NUM; media++) {
-        check(gAvshare.idxNext[media] == 0, "reset must rewind the writer ring");
         check(gAvshare.ptrConnect[media] == 1,
               "reset must preserve the active RTSP connection");
-        for (int slot = 0; slot < SHAREBUF_COUNT; slot++) {
-            check(gAvshare.bufStreamHead[media][slot].wflag == 1,
-                  "reset must discard every queued stream chunk");
-        }
     }
 
     puts("test_avshare_reset: all checks passed");

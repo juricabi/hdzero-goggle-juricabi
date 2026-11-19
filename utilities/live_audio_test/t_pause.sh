@@ -2,7 +2,8 @@
 # ripples-all: before a source switch the app pauses the recorder (RECORD_PAUSE: it stops the live video encoder
 # and ripples' avshare_reset() flushes the ring for the next video bitstream), after it the app resumes it
 # (RECORD_LIVE_STOP with a config snapshot); ctl_conf stands in for the app. The stream audio runs on through
-# both: its chain is not stopped, and its side of the ring must not be reset under its reader.
+# both: its chain is not stopped, and its side of the ring is not reset (avshare_reset() flushes the video side
+# only): no audio frame is lost, the largest pts gap stays below 1.5 AAC frames (1024 samples at 48 kHz = 21.3 ms).
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 L=$LOGS/pause
 rm -rf "$L"; mkdir -p "$L"
@@ -40,7 +41,7 @@ tail -n +"$((n + 1))" "$L/record.log" | grep -q "vi2venc_stop (live"; check $? "
 read -r gap np <<< "$(audio_gaps "$L/cap.nut")"
 back=$(audio_back "$L/cap.nut")
 echo "  capture: $(packet_counts "$L/cap.nut"), largest audio gap $gap ms, $back audio packets going back in time"
-[ "$gap" -le 100 ]; check $? "stream audio not interrupted by the pause and the resume (largest gap $gap ms)"
+[ "$gap" -le 32 ]; check $? "no stream audio frame lost through the pause and the resume (largest gap $gap ms, at most 1.5 frames: 32 ms)"
 [ "$back" = 0 ]; check $? "audio packets in order"
 vlast=$(ffprobe -v error -select_streams v -show_entries packet=pts_time -of csv=p=0 "$L/cap.nut" | sort -n | tail -1)
 awk -v t="$vlast" 'BEGIN { exit !(t >= 12) }'; check $? "video back after the resume (last video pts $vlast s)"
