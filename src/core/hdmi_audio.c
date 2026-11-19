@@ -18,14 +18,12 @@
 #include <minIni.h>
 
 #include "core/app_state.h"
-#include "core/dvr.h"
-#include "core/settings.h"
+#include "core/audio_mixer.h"
 #include "driver/it66021.h"
 #include "driver/it66121.h"
 #include "record/appmsg.h"
 #include "record/hdmi_boot.h"
 #include "ui/page_common.h"
-#include "util/system.h"
 
 #define HDMI_AUDIO_SECTION     "hdmi"
 #define HDMI_AUDIO_REQ_SECTION "hdmi_audio" // HDMIA_REQ_FILE / HDMIA_STATE_FILE (src/record/pcmbridge.c)
@@ -77,31 +75,17 @@ static int hdmi_audio_send(long cmd) {
     return msgsnd(q, &msg, sizeof(msg) - sizeof(long), IPC_NOWAIT);
 }
 
-/* HDMI-in audio in the codec: the ONE place that switches it. ripples' codec routing (src/core/dvr.c,
- * mkapp/app/script/audio_sel.sh; until the Audio page's extension, docs/status.md phase 3): on, the
- * bridge plays I2S2 into the codec DAC (AIF1), which goes into the output mixers and the line out,
- * at the DVR Playback volume (the DAC's other use is DVR playback), and the analog line-in is taken
- * out of the mix; the line out stays on although HDMI in is the source. Off: the stock state of HDMI
- * in (line out off), the DAC out of the mix. Every command returns when amixer has set its control,
- * so the DAC is out of the mix before the bridge stops playing into it. */
+/* HDMI-in audio in the codec: the ONE place that switches it, and it only tells the audio mixer
+ * (src/core/audio_mixer.c), which alone writes the codec's controls. On: the bridge plays I2S2
+ * into the codec DAC, and the mixer takes the DAC in as a live source at the HDMI In level of the
+ * Audio page, next to the analog sources at theirs; the line out stays on although HDMI in is the
+ * source (Live Volume permitting); Record Headphone Mix records it with the rest of the headphone mix.
+ * Off: the stock state of HDMI in (line out off), the DAC out of the mix. Off waits until the codec
+ * has it, so the DAC leaves the mix before the bridge stops playing into it. */
 static void hdmi_audio_line_out(bool hdmi_in_audio) {
-    char buf[128];
-    if (hdmi_in_audio) {
-        system_exec("amixer cset name='DACL Mixer AIF1DA0L Switch' 1");
-        system_exec("amixer cset name='DACR Mixer AIF1DA0R Switch' 1");
-        snprintf(buf, sizeof(buf), "%s out_linein_off", AUDIO_SEL_SH);
-        system_exec(buf);
-        snprintf(buf, sizeof(buf), "%s out_dac_on", AUDIO_SEL_SH);
-        system_exec(buf);
-        snprintf(buf, sizeof(buf), "%s out_on", AUDIO_SEL_SH); // line out on (at 31) ...
-        system_exec(buf);
-        dvr_set_dvr_audio_volume(g_setting.record.dvr_audio_volume); // ... then line out and DAC volume
-    } else {
-        snprintf(buf, sizeof(buf), "%s out_dac_off", AUDIO_SEL_SH);
-        system_exec(buf);
-        snprintf(buf, sizeof(buf), "%s out_off", AUDIO_SEL_SH);
-        system_exec(buf);
-    }
+    audio_mixer_set_live_dac(hdmi_in_audio);
+    if (!hdmi_in_audio)
+        audio_mixer_apply_wait(1000);
     line_out_hdmi = hdmi_in_audio;
 }
 
@@ -235,11 +219,9 @@ void hdmi_audio_poll(void) {
 
     if (alive && pid != daemon_pid) {
         if (daemon_pid != 0) {
-            // (its libmedia_mpp init resets part of the codec mixer: the HDMI-in route is set
-            // again with the next request below)
+            // (its libmedia_mpp init resets part of the codec mixer: the audio mixer's watcher
+            // puts its state back within about 2 s, the DAC source included)
             LOGI("hdmi audio: record daemon restarted (pid %ld)", pid);
-            if (line_out_hdmi)
-                hdmi_audio_line_out(true);
             tries = 0;
             next_try_ms = now_ms();
         }

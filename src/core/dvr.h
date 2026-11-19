@@ -27,6 +27,9 @@ void dvr_set_linein_gain(int gain);
 void dvr_mute_live_audio(void);
 void dvr_restore_live_audio(void);
 void dvr_enable_line_out(bool enable);
+// ripples' raw codec routines of before the audio mixer: only while the mixer is held (the Audio page's tests)
+void dvr_test_line_out(bool enable);
+void dvr_test_select_audio_source(uint8_t source);
 bool dvr_live_audio_is_enabled(void);
 // True when there is enough room on the card to begin a recording. With rolling
 // recording enabled the recorder frees space itself, so a nearly full card is no

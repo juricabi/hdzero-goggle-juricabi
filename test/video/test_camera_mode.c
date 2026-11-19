@@ -68,6 +68,7 @@ void DM5680_clear_vldflg(void) {}
 void DM5680_req_vldflg(void) {}
 void osd_detecting_show(bool on) {}
 void hdmi_audio_apply(bool hdmi_in_shown) {} // HDMI audio (ripples-all): a no-op unless in effect this boot
+bool audio_mixer_rx_audio(void) { return false; } // the audio mixer (ripples-all): Built-in RX Audio
 void osd_fhd(uint8_t fhd) {}
 int osd_clear(void) { return 0; }
 void osd_show(bool on) {}
