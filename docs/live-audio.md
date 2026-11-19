@@ -13,7 +13,7 @@ its flush in the writer's `avshare_reset()`, which is kept). ripples reworked th
 (`src/record/main.c`: the DVR control queue, rolling recordings), and the stream's hooks are
 merged into it: `live_run()` (after ripples' pause check), the AI device's users
 (`aidev_heldByOthers()`), `vvLive_onFrame()`'s clock, the stream's conf. The input is
-whatever ripples' Audio page records (Audio Source Mic / Line In / A/V In and its gains).
+whatever the Audio page records (ripples' Audio Source with the mixer's Record rows, docs/audio.md).
 
 ## 1. The live path (as found, before this change)
 
@@ -60,9 +60,9 @@ running, and never with Record Audio off**. Nothing feeds the audio side of the 
 `avshare_addAudio()` (record) and `avshare_readAudio()` (rtspLive) are unused leftovers
 (`addAudio` expects TS PES fragments; `readAudio` computes `tv_usec = ts*100/9` without a modulo).
 Input routing is not touched by this work: the stream carries whatever the codec's ADC captures
-on AI device 0, which is what the DVR records: on `ripples-all` ripples' Audio page (Audio Source
-Mic / Line In / A/V In, Mic Gain, Line/AV Gain); on `all` the **Recording** section of its Audio
-page (docs/audio.md there). The headphone volume does not change it.
+on AI device 0, which is what the DVR records: the Audio page's recording rows (docs/audio.md: on
+`ripples-all` ripples' Audio Source, the preset of Record Mic / Line In / A/V In, Record Headphone
+Mix and Line/AV Gain, the level). The headphone volume does not change it.
 
 ### The shared ring (`src/record/avshare.c` writer, `src/rtspLive/stream/avshare.c` reader)
 
@@ -148,8 +148,8 @@ file), `ADTSAudioStreamDiscreteFramer` (*adds* ADTS headers).
   (it runs on; ripples' `avshare_reset()` then flushes the ring and the reader resynchronises,
   `t_pause.sh`).
 - The chain captures from the same `[ai] device` as recording: the stream carries what the DVR
-  records (ripples' Audio Source). HDMI-in audio is not in it on `ripples-all` (the DAC is not
-  recorded there; on `all` with HDMI In Audio and Record What I Hear on, docs/hdmi-audio.md).
+  records (the Audio page's recording rows). HDMI-in audio is in it only with HDMI In Audio and
+  Record Headphone Mix on (docs/hdmi-audio.md).
 - Users of the AI device: recording with audio, the AI -> AO loop, the stream audio and the HDMI
   out audio bridge (`pcmbridge.c`, route `src=ai`) can run at the same time (channels on one
   device). `aidev_heldByOthers(recCtx, self)` in `main.c` answers whether a user other than

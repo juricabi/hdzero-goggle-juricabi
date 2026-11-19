@@ -19,9 +19,9 @@ Local worktree on the developer's machine (WSL): `/root/hdz/goggle-ripples` (`ri
 
 1. **ripples as the base, module bay control**: done.
 2. **Live-stream audio and HDMI audio** onto ripples' recorder (`src/record`, which ripples reworked a lot): done.
-3. The Audio page: ripples' page, its settings keys (`[record] audio`, `audio_source`, `dvr_audio_volume`,
+3. **The Audio page**: ripples' page, its settings keys (`[record] audio`, `audio_source`, `dvr_audio_volume`,
    `live_audio_volume`, `mic_gain`, `linein_gain`) and its test buttons stay; it is extended with the extras of
-   `all`'s mixer.
+   `all`'s mixer: done.
 4. Docs, images, an independent review.
 
 ## Baseline: ripples 4fbb865 as it is
@@ -152,6 +152,61 @@ Not testable without a goggle: everything at a hardware boundary (codec, I2S, IT
 docs/live-audio.md section 4 and docs/hdmi-audio.md section 7 say what to try on the device, HDMI audio only after
 the read-only probe.
 
+## Phase 3: the Audio page, and how each overlap with ripples was resolved
+
+ripples' Audio page stays as it was at the top: Record Audio, Audio Source, and Volume Control with DVR Playback,
+Live Volume, Mic Gain, Line/AV Gain and the four test buttons. Its keys and test buttons are kept. Below it come the
+extras of `all`'s audio mixer (082b2f5) in `all`'s sections: the headphone level of each source (Mic, Line In,
+A/V In, HDMI In), the Record switches with Record Headphone Mix, Built-in RX Audio (Goggle 2, BoxPro), and the HDMI
+Out / HDMI In Audio rows. These replace phase 2's hand-set `[hdmi]` keys and its `audio_sel.sh` route for HDMI-in
+audio. They come with the mixer's worker and watcher and the settings migration. The full description is in
+docs/audio.md.
+
+| where | ripples has | resolved |
+|---|---|---|
+| the page | a fixed grid: Record Audio, Audio Source, "Volume Control:" with four sliders and Run Test, a four-line note | ripples' rows first, in its order and with its keys; `all`'s extras below in `all`'s sections; `all`'s scrolling list (10 rows) with the hint of the selected row below (ripples' note when Run Test is selected, in ripples' font); `MAX_PANELS` 19 |
+| codec routing | `dvr.c` + `audio_sel.sh`: a source switch runs `in_*` and the source's gain, then `out_on`, the Live Volume, `out_linein_on`, `out_dac_off`; the recording start selects the source again | `all`'s mixer (one batch per state, a worker, the watcher) sets the whole routing. `dvr_select_audio_source()` / `dvr_enable_line_out()` keep their call sites and apply the mixer; the recording start (ripples' DVR worker) waits for it |
+| Audio Source | one source (`in_mic1` / `in_mic2` / `in_linein`); the receiver's audio with A/V In | the preset of `all`'s Record switches (exactly that source directly) and of Built-in RX Audio; Record Headphone Mix stays as it is; a hint when the Record rows differ from it ("Changed in the Recording section below") |
+| Live Volume | line-out volume `(v*31+5)/10` and the LINEIN gain by a cubic curve, applied on release; never switches the line out on | the mixer's line-out volume; moving it also sets the A/V In level by ripples' curve (A/V In can be trimmed afterwards); it does not make the headphones live from boot (`phones_at_boot`), as ripples never switched the line out on |
+| Mic Gain, Line/AV Gain | the MIC1 preamp (with Mic as the source only); the ADC input gain and the MIC2 preamp (with Line In / A/V In only) | MIC1 = Mic Gain and MIC2 = Line/AV Gain always (each acts on its own input only); ADC input gain = Line/AV Gain whenever more than the mic alone is recorded, else the record daemon's 0 dB, as ripples left it with Mic |
+| `all`'s Volume, Playback Volume, Mic Boost, Line In Boost, Record Level | - | not added: ripples' Live Volume, DVR Playback, Mic Gain and Line/AV Gain are the same controls. Their `[mixer]` keys are never written or removed; `headphones`, `playback`, `mic_boost` and `dvr_level` are read for the migration from `all` (Line/AV Gain takes `dvr_level`, the ADC gain both set, not `line_in_boost`) |
+| DVR playback | `adec2ao.c`: live audio muted, the DVR Playback volume (line-out table, DAC volume), restored at the end; the file's left DAC channel through libmedia_mpp's route | ripples' code as it is; the mixer held (no batch, no watching) from before `media_init()` to after `media_exit()`, then its state applied. `all`'s playback (both DAC channels at 152) not taken: ripples found the output mixer's DAC path tied to static on the Goggle 1 |
+| test buttons | ripples' own routing (`audio_sel.sh`, `dvr_select_audio_source(source)`), its own restore of the source and line out | ripples' test code, with its routing kept in `dvr.c` as `dvr_test_select_audio_source()` / `dvr_test_line_out()`; the mixer held during the test and applied afterwards (instead of ripples' restore) |
+| HDMI-in audio | phase 2: `audio_sel.sh` at the DVR Playback volume, not recorded | `all`'s: a live source of the mixer at the HDMI In level, recorded with Record Headphone Mix (`src/core/hdmi_audio.c` as on `all`) |
+| HDMI rows | phase 2: `[hdmi]` by hand | `all`'s rows with their Restart / Error marks and fault hints, on every target; off by default; HDMI audio only after the read-only probe, the BoxPro as the goggles (docs/audio.md, docs/hdmi-audio.md) |
+| settings | ripples' `[record]` keys | the extras in `[mixer]` with `all`'s keys (version 2), ripples' keys in `[record]`; fresh: ripples' defaults; from ripples 1.2.2: ripples' state, nothing written; from `all`: its `[mixer]` in effect, ripples' values from `all`'s equivalents in memory, nothing written, `all`'s own keys kept; back to ripples: ripples' keys as written; leaving the page without a change writes nothing |
+| the built-in receiver's audio | `rtc6715.init(1, audio_source == A/V In)` (`app_state.c`, `ht.c`) | `audio_mixer_rx_audio()` (Built-in RX Audio, preset by the Audio Source) |
+| Storage page | - | `audio_mixer_recheck()` after a format or repair (the record daemon's restart resets the codec) |
+| translations | ripples' own Audio strings are untranslated in ripples 1.2.2 (shown in English) | left so; `all`'s translations of the extras and one new hint in the five languages; `TRANSLATE_STRING_NUM` 384 -> 512 (ja_jp has 384 entries now) |
+| ripples' tests | `test/video` builds `app_state.c`, `test/motion` `ht.c`, `test/record`'s `test_dvr_naming` `dvr.c` | a stand-in for each new symbol they need (`audio_mixer_rx_audio()`, `audio_mixer_set_line_out()`, `audio_mixer_apply_wait()`), next to their other stand-ins. `test/motion` checks that a wake powers the receiver with its audio as ripples' Audio Source says (on with A/V In): its stand-in for Built-in RX Audio is that preset, so the check stays as it is |
+| the emulator | no codec, `system_exec()` a no-op | the mixer runs (its amixer call a no-op), the watcher finds no codec and backs off |
+
+## Results of phase 3 (all on the PC)
+
+| what | result |
+|---|---|
+| images, `build_all.sh` (goggle, goggle2, boxpro), Release with `-Werror` | built from 90627cc (the commit after it changes only docs), no compiler warning; listed below. Each commit of phase 3 builds (the goggle image at 8e192da and ac43c30, no warning). The emulator runs, ripples' tests and the strings ran on the same code before the commits, but for the test hook of the mixer, which only the host test builds |
+| emulator builds (goggle, goggle2, boxpro) | ripples' one warning (`page_version.c`) and no new one |
+| `utilities/audio_mixer/test_mixer.py` (new on this branch: ripples' `settings.c` + the mixer, three targets) | all passed, Goggle 1, Goggle 2 and BoxPro (about 90 s); at 90627cc |
+| `utilities/audio_mixer/mutants.py` | 74 mutants, 74 killed, at 90627cc (6 in parallel, about 45 min). The first full run, at the code before the last test additions, left 3 alive: all's headphones mapped without rounding and all's headphones over ripples' own Live Volume (no setting.ini case told them apart), and hold taken between the worker taking a state and writing it (a race no test reached). Added: two all-firmware cases (headphones 27; ripples' Live Volume from before all's) and a hook of the host test right before a batch (`AUDIO_MIXER_TEST_HOOKS`, not built into the firmware) with the case "hold, taken right before a batch"; each of the three was then killed on its own, and the full run above killed all |
+| `utilities/audio_mixer/check_strings.py` | 172 strings (both layouts) x 6 languages: translated (ripples' own nine labels and its note shown in English, as on ripples 1.2.2), in the font, fitting |
+| emulator, sandboxed (`emu_run.sh`): start, port vs ripples | Goggle 1, Goggle 2, BoxPro, three starts each (no setting.ini, ripples' shipped one, the one ripples wrote at its first start), against ripples' own emulator build (ripples-base 4fbb865): setting.ini identical after 2 s and at the end, no `[mixer]` written, no early exit or crash; the log shows the mixer taking ripples' values (`from record/audio_source=0 live_audio_volume=10`) |
+| emulator: the Audio page, every row (`keys/audio_page.txt`) | all three targets, each from no setting.ini, from ripples' shipped one (its boot scan off, so that the keys reach the menu on the Goggle 1 too) and from one of `all`'s firmware: every row selected in turn and drawn (21 screenshots each; 19 rows on Goggle 2 / BoxPro, 18 on Goggle 1 without Built-in RX Audio; ripples' note under Run Test; HDMI In greyed), leaving the page wrote nothing (0 lines), and the start left `[record]`, `[mixer]` and `[hdmi]` of the given setting.ini as they were |
+| emulator: changes on the page (`keys/audio_change.txt`, Goggle 2, BoxPro) | Goggle 2 and BoxPro, from ripples' setting.ini and from `all`'s: each change wrote exactly its keys (Mic: `[mixer] mic`, with `phones_at_boot` and `version=2` the first time; Record Headphone Mix: `rec_mix`; Audio Source: `[record] audio_source` and the Record switches / Built-in RX Audio its preset changes; Live Volume: `live_audio_volume` and `av` by ripples' curve); the DVR test ran ripples' commands and the mixer applied its state afterwards; leaving wrote nothing more |
+| ripples' tests (`run_ripples_tests.sh`) | as in the baseline (ripples-base 4fbb865) and phase 2: all pass except `test_dvr_naming`'s build on glibc (in `record` and `record_control`, left to the owner). `test/motion` failed with a first stand-in that ignored the Audio Source; with the preset (above) it passes on all three targets |
+| the suites of phases 1 and 2 | `it66121_seq_test.sh` 12, `it66021_edid_test.sh` 5, `pcmbridge_test.sh` 78, `hdmi_boot_test.sh` 352 pass (as in phase 2); `make -C utilities/module_bay_test test` 170 pass (as in phase 2); `utilities/module_bay_test/check_strings.py`: 46 strings x 6 languages fit (the language files grew); `run_probe.sh run`: 65 pass, as in phases 1 and 2. Not rerun, as none of their files changed in phase 3: `c_mutants.sh`, `utilities/module_bay_test/mutants.sh`, `run_probe.sh mutants`, the live-stream suites (`src/record`, `src/rtspLive` untouched) |
+
+Images of phase 3 (built on the developer's machine, not released):
+
+| image | bytes | SHA-256 |
+|---|---|---|
+| HDZERO_GOGGLE-77-206-1.2.2-ripples-90627cc.bin | 10076160 | 76e203457068790bdfac6371ae9933dc6ab10035391d17e5c2e2da804464ea46 |
+| HDZERO_GOGGLE2-77-198-1.2.2-ripples-90627cc.bin | 12912640 | 7956625c9780cabcb044bff52c4b0ca5a6e5c64211ded8e856a972e347a06b5a |
+| HDZERO_BOXPRO-77-211-1.2.2-ripples-90627cc.bin | 9768960 | fd755a58e3115d6b8bc53e3e531305e4a98bb83e4af7d3f4c8a52c9650175be9 |
+
+Not testable without a goggle: everything audible (levels, clicks, noise), ripples' playback and tests after the
+mixer, the record daemon's reset timing, every HDMI audio path (docs/audio.md, "Testing on a goggle").
+
 ## Build, emulate, test
 
 All on Linux (WSL Ubuntu 24.04, root), worktree on the Linux file system. Scripts: [utilities/dev/](../utilities/dev/README.md).
@@ -163,6 +218,7 @@ utilities/dev/emu_run.sh /root/hdz/emu/build_goggle - $PWD/utilities/dev/keys/ch
 utilities/dev/run_ripples_tests.sh                                           # ripples' test/*, as an unprivileged uid
 make -C utilities/module_bay_test test                                       # ~2 min; mutants.sh ~20 min
 python3 utilities/module_bay_test/check_strings.py
+python3 utilities/audio_mixer/test_mixer.py                                  # ~90 s; mutants.py ~45 min, check_strings.py
 utilities/dev/run_probe.sh run                                               # probe kit (~10 min); also: mutants (~25 min)
 sh utilities/probe/test/it66121_seq_test.sh                                  # and it66021_edid_test.sh, pcmbridge_test.sh, hdmi_boot_test.sh
 utilities/probe/test/c_mutants.sh                                            # mutants of the HDMI audio C code (~15 min)
@@ -172,17 +228,21 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
 
 ## Open, in this order
 
-1. Phase 3 (the Audio page: ripples' page with its keys and test buttons, extended with `all`'s mixer extras and
-   the HDMI Audio rows, which then replace the hand-set `[hdmi]` keys and ripples' codec routing for HDMI-in
-   audio), phase 4 (docs, images, review).
+1. Phase 4 (docs, images, an independent review).
 2. A decision for the owner: ripples' `test_dvr_naming.c` does not build on glibc; fix it here (it is ripples'
    test) or leave it to ripples.
 3. On the goggle (only by its owner, never flashed without asking): everything of docs/module-bay.md, "Untested
    on hardware", now on ripples' firmware; the order of module-bay-mod-safety.md (Check Pins with Module None
-   first); Stream Audio (docs/live-audio.md section 4); HDMI audio only after the read-only probe
+   first); Stream Audio (docs/live-audio.md section 4); the Audio page (docs/audio.md, "Testing on a goggle":
+   ripples' rows, playback and test buttons as before, the extras); HDMI audio only after the read-only probe
    (docs/hdmi-audio.md section 7).
 4. Known and left as it is: a goggle with a legacy `/data/confs/record.conf` streams without audio (rtspLive reads
    that file, the WiFi page writes the app's; the same on `all`).
 5. `utilities/live_audio_test/t_kill.sh` is flaky on this host (3 of 9 runs, results of phase 2): its stop times
    are seen by polling the log on the wall clock. Measuring them from the recorder's own log times would make it
    exact; that changes a check, so it is left for the review (phase 4).
+6. From phase 3, for the owner or the review (docs/audio.md): ripples' own Audio strings (nine labels and the
+   test note) are untranslated in ripples 1.2.2 and stay English here; translate them here or leave them to
+   ripples. From `all`'s firmware, DVR Playback follows `all`'s `playback` only roughly (`all`'s DAC was 6 dB
+   lower). The Live Volume hint says it does not affect recording: true of the line out, but moving Live Volume
+   also sets A/V In, which Record Headphone Mix records when it is on.
