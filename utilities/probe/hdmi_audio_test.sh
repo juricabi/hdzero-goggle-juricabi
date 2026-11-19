@@ -4,6 +4,9 @@
 # exactly what it changed on every exit path (end, error, Ctrl-C, kill, hang-up) and never
 # writes flash. A power cycle also undoes everything (rc.sh sets the pins at boot).
 #
+# Part A runs only with the read-only probe's GO for this board (hdmi_audio_go.txt on the SD card, written by
+#   hdmi_audio_probe.sh; the same rule as the firmware's boot step, src/record/hdmi_boot.c). Without it part A
+#   logs why and touches neither the IT66121 nor the pin mux; part B runs as before (it writes no PH_CFG0).
 # Part A, HDMI OUT: TV/monitor with speakers on the goggle HDMI out, source NOT HDMI in
 #   (the app switches HDMI out off while HDMI in is shown). Programs the IT66121 audio
 #   input, plays a 1 kHz tone (-12 dBFS) for 15 s into ALSA hw:snddaudio0 (I2S0) and logs
@@ -661,8 +664,63 @@ run_wait() {
     bg_forget "$RF_PID"
 }
 
+# This board's id, as src/record/hdmi_boot.c hdmi_boot_board_id() reads it: the first of sys_info's
+# sunxi_chipid and sunxi_serial and cpuinfo's Serial that is 1..64 letters and digits and not all zeros
+board_id() {
+    for bs in "$R/sys/class/sunxi_info/sys_info sunxi_chipid" "$R/sys/class/sunxi_info/sys_info sunxi_serial" "$R/proc/cpuinfo Serial"; do
+        # shellcheck disable=SC2016 # awk's own variables
+        bv=$(awk -v k="${bs##* }" '{ i = index($0, ":"); if (!i) next; key = substr($0, 1, i - 1); gsub(/[ \t]/, "", key)
+            if (key != k) next; v = substr($0, i + 1); sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v); print v; exit }' "${bs% *}" 2> /dev/null)
+        case "$bv" in "" | *[!0-9A-Za-z]*) continue ;; esac
+        [ ${#bv} -le 64 ] || continue
+        case "$bv" in *[!0]*)
+            echo "$bv"
+            return
+            ;;
+        esac
+    done
+    echo unknown
+}
+
+# The read-only probe's GO for this board (its hdmi_audio_go.txt on the SD card), read by the rule of
+# src/record/hdmi_boot.c hdmi_boot_probe(): a whole small file ending in a newline, key=value lines of
+# printable characters, hdmi_audio_probe=GO and board=<this board's id> exactly once each. GO_WHY: why not.
+GO_FILE="$R/mnt/extsd/hdmi_audio_go.txt"
+probe_go() {
+    GO_WHY=""
+    GO_BOARD=$(board_id)
+    if [ ! -f "$GO_FILE" ]; then
+        GO_WHY="no GO of the HDMI audio probe ($GO_FILE)"
+        return 1
+    fi
+    gs=$(wc -c < "$GO_FILE" 2> /dev/null)
+    if [ -z "$gs" ] || [ "$gs" -lt 1 ] || [ "$gs" -gt 1024 ] || [ -n "$(tail -c 1 "$GO_FILE" 2> /dev/null)" ]; then
+        GO_WHY="the probe's marker is unreadable, empty, too long or cut short"
+        return 1
+    fi
+    # shellcheck disable=SC2016 # awk's own variables
+    gv=$(awk -v want="$GO_BOARD" 'BEGIN { ok = 1 } /[^ -~]/ || !/=/ { ok = 0 }
+        { i = index($0, "="); k = substr($0, 1, i - 1); v = substr($0, i + 1)
+          if (k == "hdmi_audio_probe") { ng++; go = v } else if (k == "board") { nb++; b = v } }
+        END { if (!ok || ng != 1 || nb != 1) print "invalid"; else if (go != "GO") print "not-go " go
+              else if (b != want) print "other " b; else print "go" }' "$GO_FILE" 2> /dev/null)
+    case "$gv" in
+        go) return 0 ;;
+        not-go*) GO_WHY="the HDMI audio probe said ${gv#not-go }" ;;
+        other*) GO_WHY="the probe's GO is for board ${gv#other }, this is $GO_BOARD" ;;
+        *) GO_WHY="the probe's marker is not key=value lines with hdmi_audio_probe= and board= once each" ;;
+    esac
+    return 1
+}
+
 part_out() {
     log "==== part A: HDMI OUT audio ===="
+    # first the read-only probe's GO for this board, as the firmware's boot step: without it nothing here
+    if ! probe_go; then
+        log "part A skipped: $GO_WHY (run hdmi_audio_probe.sh first, docs/hdmi-audio.md section 7): IT66121 and PH_CFG0 not touched"
+        return
+    fi
+    log "the HDMI audio probe's GO for board $GO_BOARD"
     if ! have aplay || ! have i2cget || ! have i2cset; then
         log "aplay / i2c-tools missing"
         return

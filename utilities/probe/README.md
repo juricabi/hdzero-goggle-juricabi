@@ -25,7 +25,7 @@ nothing is written to flash.
 | file | what it does | what it touches (run time only) |
 |---|---|---|
 | `hdmi_audio_probe.sh` | **run this first.** The verdict for HDMI Out Audio on this board, and on GO the file the firmware requires for it (`hdmi_audio_go.txt` on the SD card; NO-GO removes it; docs/hdmi-audio.md, section 7). Sound cards, mixer controls, device tree, pin mux, GPIOs, I2S/PIO/CCU registers, PH_CFG0 read two ways (the `sunxi_dump` latch and `/dev/mem`) and the HDMI audio boot record `/tmp/hdmi_audio.boot`, IT66121 + IT66021 register dumps, dmesg, tool list | pauses the app for each register window; the bank register 0x0F of the two ITE chips (read with the app stopped, put back before it continues); the `sunxi_dump` address latch; one word of `/dev/mem` (PH_CFG0), read only, with `devmem` of the services package's busybox (`/mnt/app/services/busybox/busybox`, if present; never given a value); GPIO 131 (beeper) export; mounts debugfs (RAM) if needed and unmounts it; SD-card mode: starts the app. Never reads FIFO/data registers (I2S RX/TX FIFO, IT66121 0x17 DDC FIFO): a read there would take data out of a stream |
-| `hdmi_audio_test.sh` + `tone1k_48k_s16le_2ch.raw` | optional active test: 1 kHz tone to HDMI out, 10 s recording from HDMI in | IT66121 audio registers (only if Reg04 shows no video/HDCP/RCLK reset: 0x14 as the stock init leaves it, or 0x00 with HDMI Out Audio in effect; Reg04 itself only as the constants 0x04 and 0x00); PH1-PH3 pin function: `PH_CFG0` only if it reads exactly the stock 0x35517751, and only as the constant 0x35513331 (left as found if HDMI Out Audio already switched it this boot; any other value: refused); I2S0 `CTL` mode/clock fields, IT66021 bank register; all put back |
+| `hdmi_audio_test.sh` + `tone1k_48k_s16le_2ch.raw` | optional active test: 1 kHz tone to HDMI out, 10 s recording from HDMI in. The HDMI out part (A) runs only with the probe's GO for this board (`hdmi_audio_go.txt`, read by the firmware's rule: `hdmi_audio_probe=GO`, `board=` this board's id); otherwise it says why and touches neither the IT66121 nor the pin mux, and part B runs as always | part A: IT66121 audio registers (only if Reg04 shows no video/HDCP/RCLK reset: 0x14 as the stock init leaves it, or 0x00 with HDMI Out Audio in effect; Reg04 itself only as the constants 0x04 and 0x00); PH1-PH3 pin function: `PH_CFG0` only if it reads exactly the stock 0x35517751, and only as the constant 0x35513331 (left as found if HDMI Out Audio already switched it this boot; any other value: refused); I2S0 `CTL` mode/clock fields, IT66021 bank register; all put back |
 | `bay_gpio_pattern.sh` | optional: drives GPIO 192/193/194 (PG0-PG2) high one after another, to find where they arrive and read their voltage | drives one pin at a time (the other two stay inputs), **bay empty**, SD-card mode; puts their data bit and function back |
 
 ## 1. Read-only probe (please always send this)
@@ -43,7 +43,9 @@ SSH alternative: `sh /mnt/extsd/hdmi_audio_probe.sh` (one pass, about a minute).
 
 ## 2. Optional: HDMI audio test
 
-Needs a TV/monitor **with speakers** on HDMI out, and for part B an HDMI source that plays sound.
+Needs a TV/monitor **with speakers** on HDMI out, and for part B an HDMI source that plays sound. Run the probe
+(section 1) first and keep its `hdmi_audio_go.txt` on the card: without a GO for this board the test skips its
+HDMI out part ("part A skipped: …" in the report, nothing of the IT66121 or the pin mux touched).
 
 1. Copy `hdmi_audio_test.sh` as `develop.sh` **and** `tone1k_48k_s16le_2ch.raw` to the SD root.
 2. Boot (the script starts the goggle app first), stay on the HDZero/menu screen (not HDMI
@@ -114,7 +116,7 @@ released. Send `bay_gpio_N.txt` and the contact/voltage notes.
   **Not as root**: it refuses (a stub that were bypassed would reach the host's real
   `i2cset`, `mount` and `kill`); from a root shell use `utilities/dev/run_probe.sh run`,
   which runs it as an unused uid in its own pid namespace.
-* `sh utilities/probe/test/mutants.sh`: 18 mutants with one safety property broken each
+* `sh utilities/probe/test/mutants.sh`: 28 mutants with one safety property broken each
   (e.g. the app never resumed, no trap, a single latch read, PH_CFG0 written from any
   value, Reg04 unchecked, devmem given a value, the pin finder driving two pins); the tests
   must fail on every one. `MUT_OLD=<dir>` also runs an older kit (the review's mutant). Not
