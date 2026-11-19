@@ -141,7 +141,8 @@ GPIO outputs PH0/PH4, so nothing in the firmware changes it at run time: the boo
 section 4a switches PH1-PH3 at most once per boot, before the app and the record daemon
 start, and only from the exact stock value to one constant. (The optional probe test
 `hdmi_audio_test.sh`, started by hand, switches them for its tone by the same rule, with
-the app paused, and puts the stock value back.)
+the app paused, and puts the stock value back; it does so only with the read-only probe's GO
+for this board, as the boot step: section 7.)
 
 **`/sys/class/sunxi_dump`** (what `awr`/`aww` use; the app runs `aww` from several places)
 is one address latch for every process: `echo addr > dump; cat dump` (a single address
@@ -484,8 +485,10 @@ first of `/sys/class/sunxi_info/sys_info`'s `sunxi_chipid` and `sunxi_serial` an
 Audio page read it the same way (`hdmi_boot_board_id()`), so a GO on an SD card moved to another
 goggle does not count. (A goggle with no readable id is `unknown`: its GO counts on any goggle
 without one.) The GO is about the SoC side only: whether PH1-PH3 reach the IT66121, and nothing
-else, on the board is what no probe can read (sections 1 and 9). Optional: `hdmi_audio_test.sh` (tone to HDMI out, 10 s HDMI in
-recording) and `bay_gpio_pattern.sh` (module-bay pin finder, bay empty). Please do it on
+else, on the board is what no probe can read (sections 1 and 9). Optional, after a GO:
+`hdmi_audio_test.sh` (tone to HDMI out, 10 s HDMI in recording; its HDMI out part runs only with
+the probe's GO for this board, by the same rule, and is skipped otherwise, touching neither the
+IT66121 nor the pin mux; the HDMI in part runs either way and writes no PH_CFG0) and `bay_gpio_pattern.sh` (module-bay pin finder, bay empty). Please do it on
 both a Goggle 1 and a Goggle 2.
 
 ## 8. Decision table

@@ -68,6 +68,13 @@ else
 fi
 block() { sed -n '/^# ===== probe common block/,/^# ===== end of probe common block/p' "$1"; }
 b0=$(block "$KIT/hdmi_audio_test.sh")
+# the board id: read the same way by the probe (which writes the GO) and the tone test (which requires it)
+bid() { sed -n '/^board_id() {$/,/^}$/p' "$1"; }
+if [ -n "$(bid "$KIT/hdmi_audio_probe.sh")" ] && [ "$(bid "$KIT/hdmi_audio_probe.sh")" = "$(bid "$KIT/hdmi_audio_test.sh")" ]; then
+    ok "board_id() identical in hdmi_audio_probe.sh and hdmi_audio_test.sh"
+else
+    bad "board_id() differs between hdmi_audio_probe.sh and hdmi_audio_test.sh"
+fi
 for s in $SCRIPTS; do
     if [ -n "$b0" ] && [ "$(block "$KIT/$s")" = "$b0" ]; then ok "$s: common safety block identical"; else bad "$s: common safety block differs"; fi
 done
@@ -147,6 +154,8 @@ setup() { # $1 = test dir: fresh root (R) + model (M)
     echo "pin 227 (PH3): (MUX UNCLAIMED) (GPIO UNCLAIMED)" >> "$pm"
     mkdir -p "$R/sys/class/sunxi_info"
     printf 'sunxi_platform    : sun8iw16p1\nsunxi_chipid      : 33806c0014d2c0a8\n' > "$R/sys/class/sunxi_info/sys_info"
+    # the probe's GO for this board (hdmi_audio_test.sh part A requires it; the probe's cases rewrite or remove it)
+    printf 'hdmi_audio_probe=GO\nboard=33806c0014d2c0a8\nprobe_version=4\n' > "$R/mnt/extsd/hdmi_audio_go.txt"
     printf 'gpiochip0: GPIOs 0-287, parent: platform/300b000.pinctrl, 300b000.pinctrl:\n gpio-131 (                    |sysfs               ) out lo\n' > "$R/sys/kernel/debug/gpio"
     echo "snd-soc-dummy" > "$R/sys/kernel/debug/asoc/codecs"
     echo "goggle 2 stub" > "$R/mnt/app/version"
@@ -377,6 +386,45 @@ for shn in $SHELLS; do
         need tone-removed test ! -e "$R/tmp/hdmi_tone.raw"
         need helpers-gone gone hdmi_audio_test.sh
         verdict "$lbl: hdmi_audio_test ssh: both parts, everything restored, app paused only around access" "$o"
+        stop_apps
+
+        # 1a. part A needs the probe's GO for this board (as the boot step): without it, for another board or
+        # NO-GO, nothing of part A (no IT66121 access, no SoC write), part B as always
+        gate_case() { # $1 label, $2 the marker's lines ("" = none), $3 the reason logged (grep -E), $4 "cut": no final newline
+            setup "$T"
+            start_fake_app
+            rm -f "$R/mnt/extsd/hdmi_audio_go.txt"
+            if [ "${4:-}" = cut ]; then printf '%s' "$2" > "$R/mnt/extsd/hdmi_audio_go.txt"
+            elif [ -n "$2" ]; then printf '%s\n' "$2" > "$R/mnt/extsd/hdmi_audio_go.txt"; fi
+            env_run "$sh" ssh hdmi_audio_test.sh
+            o="$R/mnt/extsd/hdmi_audio_test_1.txt"
+            need skipped grep -q "part A skipped: .*IT66121 and PH_CFG0 not touched" "$o"
+            need reason grep -q -E "$3" "$o"
+            need no-soc-write nwrites 0
+            need no-it66121-access sh -c "! grep -q ' 1 0x4c ' '$M/i2c_writes' '$M/i2c_reads' 2> /dev/null"
+            need part-b grep -q "recording 1s from hw:snddaudio2" "$o"
+            need all-back all_back
+            need no-violation no_viol
+            need one-app-running apps_ok 1
+            verdict "$lbl: hdmi_audio_test, $1: part A skipped (no IT66121, no PH_CFG0), part B runs" "$o"
+            stop_apps
+        }
+        gate_case "no probe GO" "" "no GO of the HDMI audio probe"
+        gate_case "another board's GO" "$(echo hdmi_audio_probe=GO; echo board=deadbeef00)" "GO is for board deadbeef00, this is 33806c0014d2c0a8"
+        gate_case "a NO-GO" "$(echo hdmi_audio_probe=NO-GO; echo board=33806c0014d2c0a8)" "the HDMI audio probe said NO-GO"
+        gate_case "a marker cut short" "hdmi_audio_probe=GO
+board=33806c0014d2c0a8" "cut short" cut
+        # the matching GO: part A runs (and logs it)
+        setup "$T"
+        start_fake_app
+        env_run "$sh" ssh hdmi_audio_test.sh out
+        o="$R/mnt/extsd/hdmi_audio_test_1.txt"
+        need go-logged grep -q "the HDMI audio probe's GO for board 33806c0014d2c0a8" "$o"
+        need ph-set grep -q "PH_CFG0 0x35517751 -> 0x35513331" "$o"
+        need ph-restored grep -q "PH_CFG0 restored: 0x35517751" "$o"
+        need all-back all_back
+        need no-violation no_viol
+        verdict "$lbl: hdmi_audio_test with the probe's GO for this board: part A runs, everything restored" "$o"
         stop_apps
 
         # 2. the latch returns another register for one of the three reads: no write
@@ -623,6 +671,7 @@ for shn in $SHELLS; do
         stop_apps
         # the SD card not writable: GO said, the marker not written, nothing else written
         setup "$T"
+        rm -f "$R/mnt/extsd/hdmi_audio_go.txt"
         start_fake_app
         PROBE_OUTDIR=/proc env_run "$sh" ssh hdmi_audio_probe.sh
         need not-written test ! -e "$R/mnt/extsd/hdmi_audio_go.txt"

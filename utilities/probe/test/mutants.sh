@@ -37,6 +37,9 @@ bay-no-function-restore@bay_gpio_pattern.sh@s/^        if lat_write \$PG_CFG0 "\
 bay-all-three-outputs@bay_gpio_pattern.sh@s/^    echo in > "\$G\/gpio\$p\/direction" 2> \/dev\/null || refuse/    echo low > "$G\/gpio$p\/direction" 2> \/dev\/null || refuse/@bay
 bay-pin-left-output@bay_gpio_pattern.sh@s/^        echo in > "\$G\/gpio\$p\/direction" 2> \/dev\/null$/        :/@bay
 start-app-in-ssh-mode@all@s/^    \[ "\$MODE" = sd \] || return 0$/    :/@bay
+tone-test-ungated@hdmi_audio_test.sh@s/^    if ! probe_go; then$/    if false; then/@test
+tone-test-any-board@hdmi_audio_test.sh@s/^              else if (b != want) print "other " b; else print "go" }/              else print "go" }/@test
+tone-test-no-go-accepted@hdmi_audio_test.sh@s/else if (go != "GO") print "not-go " go$/else if (0) print "not-go " go/@test
 verdict-ignores-cards@hdmi_audio_probe.sh@s/^    grep -q .snddaudio0. .*$/    :/@probe
 verdict-ignores-pin-owners@hdmi_audio_probe.sh@s/^            \*) why="\$why; \$p held by \$po" ;;$/            *) ;;/@probe
 verdict-gpio-users-ok@hdmi_audio_probe.sh@s/^            \*) po="a GPIO user (\$pl)"; return ;;$/            *) ;;/@probe
@@ -46,9 +49,12 @@ verdict-board-unknown-always@hdmi_audio_probe.sh@s/^        bid=\$(board_id)$/  
 verdict-devmem-ignored@hdmi_audio_probe.sh@s/^    \[ "\$dm_cmp" = differ \] \&\& why=.*$/    :/@probe
 '
 
+# (no single quote in an expression above: it would end the list early, and no mutant would run)
+listed=$(printf '%s\n' "${MUTANTS:-}" | grep -c '@')
 # (printf, not echo: dash's echo turns a backslash and a digit into a control character)
 printf '%s\n' "$MUTANTS" | while IFS='@' read -r name files expr groups; do
     [ -n "$name" ] || continue
+    echo "$name" >> "$T/ran"
     d="$T/$name"
     mkdir -p "$d/test"
     cp "$KIT"/*.sh "$KIT"/*.raw "$d/"
@@ -72,6 +78,11 @@ printf '%s\n' "$MUTANTS" | while IFS='@' read -r name files expr groups; do
     fi
 done
 [ -f "$T/fail" ] && fail=1
+ran=$(cat "$T/ran" 2> /dev/null | wc -l)
+if [ "$listed" -eq 0 ] || [ "$ran" -ne "$listed" ]; then
+    echo "BROKEN: $ran of $listed listed mutants ran"
+    fail=1
+fi
 
 if [ -n "${MUT_OLD:-}" ]; then
     mkdir -p "$T/old/test"
