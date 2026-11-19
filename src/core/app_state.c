@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "core/dvr.h"
+#include "core/hdmi_audio.h"
 #include "core/input_device.h"
 #include "core/msp_displayport.h"
 #include "core/osd.h"
@@ -62,6 +63,7 @@ void app_switch_to_menu() {
     g_sdcard_det_req = 1;
     if (g_source_info.source == SOURCE_HDMI_IN) // HDMI
         IT66121_init();
+    hdmi_audio_apply(false); // HDMI audio (experimental): no-op unless in effect this boot
 
     rtc6715.init(0, 0);
 #if defined(HDZBOXPRO) || defined(HDZGOGGLE2)
@@ -139,6 +141,7 @@ void app_switch_to_analog(bool is_av_in) {
 
     // audio in&out
     dvr_select_audio_source(g_setting.record.audio_source);
+    hdmi_audio_apply(false); // HDMI audio (experimental): no-op unless in effect this boot; before the line out is set
     dvr_enable_line_out(true);
 
     sleep(1);
@@ -174,6 +177,7 @@ void app_switch_to_hdmi_in() {
     dvr_enable_line_out(false);
     g_setting.autoscan.last_source = SETTING_AUTOSCAN_SOURCE_HDMI_IN;
     ini_putl("autoscan", "last_source", g_setting.autoscan.last_source, SETTING_INI);
+    hdmi_audio_apply(true); // HDMI audio (experimental): no-op unless in effect this boot
 
     system_script(REC_STOP_LIVE);
 }
@@ -270,6 +274,7 @@ void app_switch_to_hdzero(bool is_default) {
     // The peripheral detector can retime again after Display_* releases the
     // hardware lock. Do not overwrite its newer DVR format with our entry mode.
     dvr_update_vi_conf(CAM_MODE);
+    hdmi_audio_apply(false); // HDMI audio (experimental): no-op unless in effect this boot
     system_script(REC_STOP_LIVE);
 
     osd_detecting_show(false); // restore the normal channel tag

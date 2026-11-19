@@ -21,6 +21,7 @@
 #include "core/common.hh"
 #include "core/defines.h"
 #include "core/dvr.h"
+#include "core/hdmi_audio.h"
 #include "core/input_device.h"
 #include "core/msp_displayport.h"
 #include "core/osd.h"
@@ -254,6 +255,7 @@ static void *thread_peripheral(void *ptr) {
                 if (g_sdcard_enable) {
                     sdcard_update_free_size();
                 }
+                hdmi_audio_poll(); // HDMI audio (experimental): returns at once unless in effect this boot
             }
             // detect HDZERO
             record_vtmg_change = HDZERO_detect();

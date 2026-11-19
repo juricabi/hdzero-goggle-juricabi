@@ -23,6 +23,12 @@ uint8_t i2c_read(int port, uint8_t slave_address, uint8_t addr) {
     return 0;
 }
 
+// (the IT66121's checked reads, src/driver/i2c.h: the transfer fails, as on a port that is not ready)
+int i2c_read_checked(int port, uint8_t slave_address, uint8_t addr, uint8_t *val) {
+    (void)port, (void)slave_address, (void)addr, (void)val;
+    return -1;
+}
+
 int i2c_write(int port, uint8_t slave_address, uint8_t addr, uint8_t val) {
     (void)port, (void)slave_address, (void)addr, (void)val;
     return -1;

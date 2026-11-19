@@ -84,6 +84,28 @@ static uint8_t iic_read(int i2c_fd, uint8_t slave_address, uint16_t reg_address)
     return val;
 }
 
+// the same transfer as iic_read(), but a failed transfer is reported (iic_read() returns 0 then)
+static int iic_read_checked(int i2c_fd, uint8_t slave_address, uint16_t reg_address, uint8_t *out) {
+    struct i2c_rdwr_ioctl_data work_queue;
+    struct i2c_msg msgs[2];
+    uint8_t val = (uint8_t)reg_address;
+
+    work_queue.nmsgs = 2;
+    work_queue.msgs = msgs;
+    msgs[0].len = 1;
+    msgs[0].flags = 0;
+    msgs[0].addr = slave_address;
+    msgs[0].buf = &val;
+    msgs[1].len = 1;
+    msgs[1].flags = 1;
+    msgs[1].addr = slave_address;
+    msgs[1].buf = &val;
+    if (ioctl(i2c_fd, I2C_RDWR, (unsigned long)&work_queue) != 2)
+        return -1;
+    *out = val;
+    return 0;
+}
+
 static void iic_read_n(int i2c_fd, uint8_t slave_address, uint16_t reg_address, uint8_t *reg_data, uint16_t len) {
     struct i2c_rdwr_ioctl_data work_queue;
     struct i2c_msg msgs[2];
@@ -174,6 +196,20 @@ uint8_t i2c_read(int port, uint8_t slave_address, uint8_t addr) {
     pthread_mutex_unlock(&i2c_mutex);
 
     return val;
+}
+
+int i2c_read_checked(int port, uint8_t slave_address, uint8_t addr, uint8_t *val) {
+    int r;
+
+    if (!iic_is_port_ready(port)) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&i2c_mutex);
+    r = iic_read_checked(g_iic_fds[port], slave_address, addr, val);
+    pthread_mutex_unlock(&i2c_mutex);
+
+    return r;
 }
 
 int8_t i2c_read_n(int port, uint8_t slave_address, uint8_t addr, uint8_t *data, uint16_t len) {
