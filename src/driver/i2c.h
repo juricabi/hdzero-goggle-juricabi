@@ -8,6 +8,8 @@ extern "C" {
 
 void iic_init();
 uint8_t i2c_read(int port, uint8_t slave_address, uint8_t addr);
+// like i2c_read(), but 0 = *val read, -1 = the transfer failed (i2c_read() returns 0 then)
+int i2c_read_checked(int port, uint8_t slave_address, uint8_t addr, uint8_t *val);
 int i2c_write(int port, uint8_t slave_address, uint8_t addr, uint8_t val);
 
 int8_t i2c_read_n(int port, uint8_t slave_address, uint8_t addr, uint8_t *data, uint16_t len);
@@ -55,8 +57,9 @@ int8_t i2c_write_n(int port, uint8_t slave_address, uint8_t addr, uint8_t *val, 
 #define I2C_Write(s, a, d) i2c_write(2, s, a, d)
 #define I2C_Read(s, a)     i2c_read(2, s, a)
 
-#define I2C_R_Write(s, a, d) i2c_write(1, s, a, d)
-#define I2C_R_Read(s, a)     i2c_read(1, s, a)
+#define I2C_R_Write(s, a, d)        i2c_write(1, s, a, d)
+#define I2C_R_Read(s, a)            i2c_read(1, s, a)
+#define I2C_R_Read_checked(s, a, v) i2c_read_checked(1, s, a, v)
 
 #define I2C_L_Write(s, a, d) i2c_write(3, s, a, d)
 #define I2C_L_Read(s, a)     i2c_read(3, s, a)

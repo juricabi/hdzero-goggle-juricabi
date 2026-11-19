@@ -309,6 +309,25 @@ void IT66021_Set_CSMatrix(int cs) {
     }
 }
 
+/* ===== HDMI in audio (experimental, default off, docs/hdmi-audio.md) =====
+ * The EDID below advertises Basic Audio (CEA byte 3 bit 6, which by CEA-861 means
+ * 2-ch L-PCM at 32, 44.1 and 48 kHz) and one Short Audio Descriptor at 0x8A-0x8C:
+ * L-PCM 2 ch, 32/44.1/48 kHz, 16/20/24 bit. The HDMI-in audio path runs at 48 kHz
+ * only (I2S2 is a clock slave: another rate would play at the wrong speed), so with
+ * [hdmi] audio_in=1 the EDID says only what is true: Basic Audio cleared, SAD rates
+ * 48 kHz only (0x8B = 0x04), block 1 checksum adjusted. The chip serves the block
+ * checksums from RegC4/RegC5, not from EDID RAM bytes 0x7F/0xFF, in the mode this
+ * driver leaves it in (RegC0[1:0] = 00, shadow on): ITE's IT6602 driver,
+ * EDIDRAMInitial()/UpdateEDIDReg(), writes only bytes 0..0x7E of each block to RAM and
+ * the checksums to REG_RX_0C4/0C5. So the adjusted checksum goes to RegC5 (and RAM).
+ * Checked on the host by utilities/probe/test/it66021_edid_test.sh. */
+static bool it66021_edid_48k_only = false;
+
+void IT66021_audio_config(bool hdmi_in_audio) {
+    it66021_edid_48k_only = hdmi_in_audio;
+}
+/* ===== end HDMI in audio ===== */
+
 void IT66021_edid() {
     // Declared as static to prevent 256-byte stack allocation overhead
     static const uint8_t edid[256] = {
@@ -361,11 +380,22 @@ void IT66021_edid() {
         [255] = 0xDA
     };
     uint16_t i;
+    // HDMI in audio (experimental): with audio_in=1, no Basic Audio and 48 kHz only (see above)
+    const uint8_t cea3 = it66021_edid_48k_only ? (uint8_t)(edid[0x83] & ~0x40) : edid[0x83];
+    const uint8_t sad_rates = it66021_edid_48k_only ? 0x04 : edid[0x8b];
+    const uint8_t sum1 = (uint8_t)(edid[0xff] + (edid[0x83] - cea3) + (edid[0x8b] - sad_rates));
     I2C_L_Write(0x49, 0xc0, 0x40);
     I2C_L_Write(0x49, 0xc4, edid[0x7f]);
-    I2C_L_Write(0x49, 0xc5, edid[0xff]);
+    I2C_L_Write(0x49, 0xc5, sum1); // the block 1 checksum the chip serves
     for (i = 0; i < 256; i++) {
-        I2C_L_Write(0x54, i, edid[i]);
+        uint8_t b = edid[i];
+        if (i == 0x83)
+            b = cea3;
+        else if (i == 0x8b)
+            b = sad_rates;
+        else if (i == 0xff)
+            b = sum1;
+        I2C_L_Write(0x54, i, b);
     }
     I2C_L_Write(0x49, 0xc0, 0x24);
     usleep(2000);
