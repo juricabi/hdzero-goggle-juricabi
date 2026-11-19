@@ -102,6 +102,7 @@ typedef struct {
 typedef struct {
     root_pw_t root_pw;
     button_t ssh;
+    button_t stream_audio; // live stream audio (RTSP AAC track)
     lv_obj_t *apply_settings;
     lv_obj_t *note;
     int row_count;
@@ -306,6 +307,7 @@ static void page_wifi_update_settings() {
     g_setting.wifi.mode = btn_group_get_sel(&page_wifi.page_1.mode.button);
     g_setting.wifi.dhcp = btn_group_get_sel(&page_wifi.page_2.dhcp.button) == 0;
     g_setting.wifi.ssh = btn_group_get_sel(&page_wifi.page_3.ssh.button) == 0;
+    g_setting.wifi.stream_audio = btn_group_get_sel(&page_wifi.page_3.stream_audio.button) == 0;
 
     snprintf(g_setting.wifi.ssid[g_setting.wifi.mode], WIFI_SSID_MAX, "%s", page_wifi.page_1.ssid.text[g_setting.wifi.mode]);
     snprintf(g_setting.wifi.passwd[g_setting.wifi.mode], WIFI_PASSWD_MAX, "%s", page_wifi.page_1.passwd.text[g_setting.wifi.mode]);
@@ -336,6 +338,13 @@ static void page_wifi_update_settings() {
     ini_putl("wifi", "rf_channel", g_setting.wifi.rf_channel, SETTING_INI);
     ini_puts("wifi", "root_pw", g_setting.wifi.root_pw, SETTING_INI);
     settings_put_bool("wifi", "ssh", g_setting.wifi.ssh);
+    // Stream Audio (this build): written only when it changes, so a goggle that never had it
+    // switched on keeps setting.ini and the app partition's record.conf as before.
+    if (settings_get_bool("wifi", "stream_audio", g_setting_defaults.wifi.stream_audio) != g_setting.wifi.stream_audio)
+        settings_put_bool("wifi", "stream_audio", g_setting.wifi.stream_audio);
+    // Live stream audio: read by record and rtspLive (started below) from the record conf
+    if (ini_getl("live", "audio", -1, REC_CONF) != (g_setting.wifi.stream_audio ? 1 : 0))
+        ini_putl("live", "audio", g_setting.wifi.stream_audio ? 1 : 0, REC_CONF);
 
     // Prepare WiFi interfaces
     if (!page_wifi_bootup_pending) {
@@ -427,11 +436,12 @@ static void page_wifi_update_page_1_notes() {
 }
 
 static void page_wifi_update_page_3_notes() {
-    static char buf[256];
-    snprintf(buf, sizeof(buf), "%s:\n    %s,%s.\n",
+    static char buf[512];
+    snprintf(buf, sizeof(buf), "%s:\n    %s,%s.\n%s.\n",
              _lang("Password Requirements"),
              _lang("Minimum 8 characters"),
-             _lang("maximum 64 characters"));
+             _lang("maximum 64 characters"),
+             _lang("Stream Audio: sound set on the Audio page"));
     lv_label_set_text(page_wifi.page_3.note, buf);
 }
 
@@ -505,6 +515,7 @@ static void page_wifi_update_current_page(int which) {
     lv_obj_add_flag(page_wifi.page_3.root_pw.input, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(page_wifi.page_3.root_pw.status, LV_OBJ_FLAG_HIDDEN);
     btn_group_show(&page_wifi.page_3.ssh.button, false);
+    btn_group_show(&page_wifi.page_3.stream_audio.button, false);
     lv_obj_add_flag(page_wifi.page_3.note, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(page_wifi.page_3.apply_settings, LV_OBJ_FLAG_HIDDEN);
 
@@ -581,6 +592,7 @@ static void page_wifi_update_current_page(int which) {
         lv_obj_clear_flag(page_wifi.page_3.root_pw.input, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(page_wifi.page_3.root_pw.status, LV_OBJ_FLAG_HIDDEN);
         btn_group_show(&page_wifi.page_3.ssh.button, true);
+        btn_group_show(&page_wifi.page_3.stream_audio.button, true);
         lv_obj_clear_flag(page_wifi.page_3.apply_settings, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(page_wifi.page_3.note, LV_OBJ_FLAG_HIDDEN);
         page_wifi_update_page_3_notes();
@@ -614,7 +626,8 @@ static void page_wifi_dirty_flag_reset() {
                                         page_wifi.page_2.dns.dirty =
                                             page_wifi.page_2.rf_channel.dirty =
                                                 page_wifi.page_3.root_pw.dirty =
-                                                    page_wifi.page_3.ssh.dirty = false;
+                                                    page_wifi.page_3.ssh.dirty =
+                                                        page_wifi.page_3.stream_audio.dirty = false;
 }
 
 /**
@@ -681,7 +694,8 @@ static void page_wifi_update_dirty_flag() {
         page_wifi.page_2.dns.dirty ||
         page_wifi.page_2.rf_channel.dirty ||
         page_wifi.page_3.root_pw.dirty ||
-        page_wifi.page_3.ssh.dirty;
+        page_wifi.page_3.ssh.dirty ||
+        page_wifi.page_3.stream_audio.dirty;
 
     if (page_wifi.dirty) {
         if (!page_wifi_apply_settings_pending_timer) {
@@ -765,7 +779,10 @@ static void page_wifi_create_page_3(lv_obj_t *parent) {
     create_btn_group_item(&page_wifi.page_3.ssh.button, parent, 2, "SSH", _lang("On"), _lang("Off"), "", "", 2);
     btn_group_set_sel(&page_wifi.page_3.ssh.button, !g_setting.wifi.ssh);
 
-    page_wifi.page_3.apply_settings = create_label_item(parent, "Apply Settings", 1, 3, 3);
+    create_btn_group_item(&page_wifi.page_3.stream_audio.button, parent, 2, _lang("Stream Audio"), _lang("On"), _lang("Off"), "", "", 3);
+    btn_group_set_sel(&page_wifi.page_3.stream_audio.button, !g_setting.wifi.stream_audio);
+
+    page_wifi.page_3.apply_settings = create_label_item(parent, "Apply Settings", 1, 4, 3);
 
     page_wifi.page_3.note = lv_label_create(parent);
     lv_obj_set_style_text_font(page_wifi.page_3.note, UI_PAGE_LABEL_FONT, 0);
@@ -776,7 +793,7 @@ static void page_wifi_create_page_3(lv_obj_t *parent) {
     lv_obj_set_grid_cell(page_wifi.page_3.note, LV_GRID_ALIGN_START, 1, 4, LV_GRID_ALIGN_START, 7, 2);
     page_wifi_update_page_3_notes();
 
-    page_wifi.page_3.row_count = 4;
+    page_wifi.page_3.row_count = 5;
 }
 
 /**
@@ -844,6 +861,10 @@ static void page_wifi_exit() {
 
     if (page_wifi.page_1.mode.dirty) {
         btn_group_toggle_sel(&page_wifi.page_1.mode.button);
+    }
+
+    if (page_wifi.page_3.stream_audio.dirty) {
+        btn_group_toggle_sel(&page_wifi.page_3.stream_audio.button);
     }
 
     int mode = btn_group_get_sel(&page_wifi.page_1.mode.button);
@@ -1020,8 +1041,10 @@ static void page_wifi_on_click(uint8_t key, int sel) {
                 keyboard_press();
             }
             break;
-        case 2: // Page System: Apply Settings
-            page_wifi_handle_apply_button(page_wifi.page_3.apply_settings);
+        case 2: // Page System: Stream Audio
+            btn_group_toggle_sel(&page_wifi.page_3.stream_audio.button);
+            page_wifi.page_3.stream_audio.dirty =
+                (btn_group_get_sel(&page_wifi.page_3.stream_audio.button) != !g_setting.wifi.stream_audio);
             break;
         }
         break;
@@ -1043,6 +1066,9 @@ static void page_wifi_on_click(uint8_t key, int sel) {
             } else {
                 keyboard_press();
             }
+            break;
+        case 2: // Page System: Apply Settings
+            page_wifi_handle_apply_button(page_wifi.page_3.apply_settings);
             break;
         }
         break;

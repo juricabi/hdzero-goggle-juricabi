@@ -270,6 +270,7 @@ const setting_t g_setting_defaults = {
         .rf_channel = 11,
         .root_pw = "divimath",
         .ssh = false,
+        .stream_audio = false,
     },
     .storage = {
         .logging = false,
@@ -688,6 +689,7 @@ void settings_load(void) {
     g_setting.wifi.rf_channel = ini_getl("wifi", "rf_channel", g_setting_defaults.wifi.rf_channel, SETTING_INI);
     ini_gets("wifi", "root_pw", g_setting_defaults.wifi.root_pw, g_setting.wifi.root_pw, sizeof(g_setting.wifi.root_pw), SETTING_INI);
     g_setting.wifi.ssh = settings_get_bool("wifi", "ssh", g_setting_defaults.wifi.ssh);
+    g_setting.wifi.stream_audio = settings_get_bool("wifi", "stream_audio", g_setting_defaults.wifi.stream_audio);
 
     //  no dial under video mode
     g_setting.ease.no_dial = fs_file_exists(NO_DIAL_FILE);

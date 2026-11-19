@@ -292,6 +292,7 @@ typedef struct {
     uint8_t rf_channel;
     char root_pw[WIFI_PASSWD_MAX];
     bool ssh;
+    bool stream_audio; // live stream audio (RTSP AAC track), default off
 } wifi_t;
 
 typedef struct {

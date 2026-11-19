@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Checks every string of the Module Bay page (src/ui/page_modulebay.c, src/module/*.c) in every
-language with the firmware's own fonts:
+"""Checks every string of the Module Bay page (src/ui/page_modulebay.c, src/module/*.c) and of the
+WiFi page's Stream Audio row in every language with the firmware's own fonts:
 
   - translated in every mkapp/app/language/*.ini,
   - every character present in the font (the CJK glyphs of the fonts are only those of the
     translations the fonts were generated from, utilities/font/generate_font_lib.py),
-  - as wide as its place on the page at most (page_modulebay.c, goggles only); texts the
+  - as wide as its place on the page at most (page_modulebay.c, goggles only; the WiFi row also
+    on the BoxPro's smaller layout); texts the
     firmware puts together from several keys are measured put together, in their widest form,
   - every language file within the firmware's table (src/lang/language.h TRANSLATE_STRING_NUM).
 
@@ -47,6 +48,9 @@ MODULE_BAY = [("mb_label", t) for t in ("Module", "Mode", "Check Pins")] + [("mb
     [("mb_note", t) for t in ("Module control needs the 3-wire bay mod (resistors or level shifter).",
                               "It pauses while WiFi is on: WiFi uses the same pins.",
                               "Furious True-D with MOD 1.17: choose rapidFIRE.")]
+# The WiFi page's System rows of this branch (src/ui/page_wifi.c).
+WIFI = [("wifi_label", "Stream Audio"), ("wifi_note", ("{}.", ("Stream Audio: sound set on the Audio page",)))]
+
 # names the page shows as they are when a language has no entry (a module's own name)
 AS_IS = {"rapidFIRE", "SteadyView", "SteadyView X", "rapidFIRE 1", "rapidFIRE 2"}
 
@@ -104,13 +108,16 @@ def build(work):
             raise RuntimeError("LVGL build failed")
     lib = os.path.join(work, "liblvgl.a")
     subprocess.run(["ar", "rcs", lib, *outs], check=True)
-    exe = os.path.join(work, "check")
-    p = subprocess.run(["cc", "-std=gnu99", "-Wall", "-Werror", "-DHDZGOGGLE2=1", "-I", os.path.join(ROOT, "lib/lvgl"),
-                        "-I", os.path.join(ROOT, "src"), os.path.join(HERE, "check_strings.c"), lib,
-                        "-o", exe, "-lm"], capture_output=True, text=True)
-    if p.returncode:
-        raise RuntimeError(f"check_strings.c does not build:\n{p.stderr[-3000:]}")
-    return exe
+    tools = {}
+    for target in ("HDZGOGGLE2", "HDZBOXPRO"):
+        exe = os.path.join(work, f"check_{target}")
+        p = subprocess.run(["cc", "-std=gnu99", "-Wall", "-Werror", f"-D{target}=1", "-I", os.path.join(ROOT, "lib/lvgl"),
+                            "-I", os.path.join(ROOT, "src"), os.path.join(HERE, "check_strings.c"), lib,
+                            "-o", exe, "-lm"], capture_output=True, text=True)
+        if p.returncode:
+            raise RuntimeError(f"check_strings.c ({target}) does not build:\n{p.stderr[-3000:]}")
+        tools[target] = exe
+    return tools
 
 
 def main():
@@ -129,51 +136,60 @@ def main():
         if n > limit:
             problems.append(f"{os.path.basename(path)} has {n} entries, the table {limit}")
 
-    lines = []
-    for lang, table in langs.items():
-        for kind, text in MODULE_BAY:
-            shown = english(text) if lang == "en" else translate(text, table)
-            if shown is None:
-                missing = [k for k in keys_of(text) if k not in table]
-                problems.append(f"not translated in {lang}: {missing}")
-                shown = english(text)  # the firmware shows the English text
-            lines.append(f"{kind}\t{lang}\t{shown}")
+    def lines_of(strings):
+        out = []
+        for lang, table in langs.items():
+            for kind, text in strings:
+                shown = english(text) if lang == "en" else translate(text, table)
+                if shown is None:
+                    missing = [k for k in keys_of(text) if k not in table]
+                    problems.append(f"not translated in {lang}: {missing}")
+                    shown = english(text)  # the firmware shows the English text
+                out.append(f"{kind}\t{lang}\t{shown}")
+        return out
+
+    # the Module Bay page exists on the goggles only
+    per_target = {"HDZGOGGLE2": MODULE_BAY + WIFI, "HDZBOXPRO": WIFI}
+    lines = {target: lines_of(s) for target, s in per_target.items()}
     problems = sorted(set(problems), key=problems.index)
 
     work = tempfile.mkdtemp(prefix="module_bay_strings_")
     try:
-        exe = build(work)
+        tools = build(work)
         widest = {}
-        p = subprocess.run([exe], input="\n".join(lines) + "\n", capture_output=True, text=True)
-        answers = p.stdout.splitlines()
-        bad = 0
-        for out in answers:
-            verdict, kind, lang, size = out.split(" ")[:4]
-            if verdict == "BAD-KIND":
-                problems.append(out)
-                bad += 1
-                continue
-            used, room = (int(x) for x in size.split("/"))
-            if used * 100 // room > widest.get(kind, (0, ""))[0]:
-                widest[kind] = (used * 100 // room, out)
-            if verdict != "OK":
-                problems.append(out)
-                bad += 1
-            elif verbose:
-                print(out)
-        # the measuring program's own verdict must agree with its lines: a crash or a line it
-        # did not answer is a failure, not a pass
-        if len(answers) != len(lines) or p.returncode != (1 if bad else 0):
-            problems.append(f"the measuring program exited with {p.returncode} after "
-                            f"{len(answers)} of {len(lines)} lines: {p.stderr[-300:]}")
-        for kind, (pct, out) in sorted(widest.items()):
-            print(f"widest {kind:10s} {pct:3d} %: {out}")
+        for target, exe in tools.items():
+            p = subprocess.run([exe], input="\n".join(lines[target]) + "\n", capture_output=True, text=True)
+            answers = p.stdout.splitlines()
+            bad = 0
+            for out in answers:
+                verdict, kind, lang, size = out.split(" ")[:4]
+                if verdict == "BAD-KIND":
+                    problems.append(f"{target}: {out}")
+                    bad += 1
+                    continue
+                used, room = (int(x) for x in size.split("/"))
+                key = (target, kind)
+                if used * 100 // room > widest.get(key, (0, ""))[0]:
+                    widest[key] = (used * 100 // room, out)
+                if verdict != "OK":
+                    problems.append(f"{target}: {out}")
+                    bad += 1
+                elif verbose:
+                    print(f"{target}: {out}")
+            # the measuring program's own verdict must agree with its lines: a crash or a line it
+            # did not answer is a failure, not a pass
+            if len(answers) != len(lines[target]) or p.returncode != (1 if bad else 0):
+                problems.append(f"{target}: the measuring program exited with {p.returncode} after "
+                                f"{len(answers)} of {len(lines[target])} lines: {p.stderr[-300:]}")
+        for (target, kind), (pct, out) in sorted(widest.items()):
+            print(f"widest {kind:10s} {target:10s} {pct:3d} %: {out}")
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
     for p in problems:
         print("FAIL " + p)
-    print(f"{len(MODULE_BAY)} strings x {len(langs)} languages: "
+    count = sum(len(s) for s in per_target.values())
+    print(f"{count} strings (both layouts) x {len(langs)} languages: "
           + ("all fit" if not problems else f"{len(problems)} problems"))
     return 1 if problems else 0
 
