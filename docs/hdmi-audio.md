@@ -21,20 +21,11 @@ On all three the board wiring is unknown until the read-only probe has run on th
 same code is ported from `all` (082b2f5): the boot step and its record, the IT66121 Reg04 guard, the
 IT66021 EDID (merged with ripples' own EDID timings, whose checksum the 48 kHz-only EDID adjusts),
 the bridge in ripples' recorder, the shared `/tmp/.sunxi_dump.lock`, the BoxPro included, all off
-by default. Two differences until the Audio page's extension (docs/status.md, phase 3):
-
-* **No switches on the Audio page yet** (ripples' page is unchanged): `[hdmi] audio_out` /
-  `audio_in` are set by hand in `/mnt/app/setting.ini` (exactly `1`), then restart. No
-  "Restart" / "Error" markers; the reason for a fault is in `HDZGOGGLE.log` and
-  `/tmp/hdmi_audio.boot`.
-* **HDMI In Audio** goes through ripples' codec routing, not `all`'s audio mixer: while HDMI in
-  is shown the DAC is put into the output mixers and on the line out (`audio_sel.sh out_dac_on`,
-  `out_on`, the analog line-in out of the mix) at ripples' **DVR Playback** volume; it is not
-  recorded (no output mixer -> ADC path, no Record Headphone Mix). Leaving HDMI in puts the line
-  out and the DAC back as stock HDMI in leaves them (off). `hdmi_audio_line_out()` in
-  `src/core/hdmi_audio.c`; it is set again after a record daemon restart.
-
-What is said below about the Audio page (its rows, markers and the mixer source) is `all`'s.
+by default. The two switches are on the Audio page (ripples' page with the audio mixer's extras,
+docs/audio.md), and HDMI-in audio is a source of the audio mixer, as on `all`. The headphone
+volume is ripples' **Live Volume**, and ripples' **Line/AV Gain** is the level of the recording.
+In phase 2 (docs/status.md) the keys were set by hand and HDMI-in audio went through ripples'
+`audio_sel.sh`; both are gone.
 
 Sources: `PG`/`RL` = the IT66121 Programming Guide v1.05 / Register List (`docs/`); the
 IT66121FN and IT66021FN datasheets; **V536 datasheet** = "V536-H/V526 Datasheet Revision
@@ -295,7 +286,7 @@ built and run for each of the three targets, plus a build for no known target).
 ### 4b. The bridge
 
 The only digital audio the goggle has is the codec ADC capture (mic 1/2 or line-in, chosen
-by `audio_sel.sh`), which the record daemon reads through MPP AI device 0 for the DVR.
+by the Audio page), which the record daemon reads through MPP AI device 0 for the DVR.
 The ALSA capture device is exclusive, so a second reader (e.g. `arecord | aplay`) would
 break DVR audio.
 
@@ -319,11 +310,10 @@ start/stop/exit order by `utilities/live_audio_test/t_aidev.sh`).
 
 What HDMI out carries is the ADC capture, the same signal as the DVR and the WiFi stream:
 the Audio page's Recording section decides it (Record Headphone Mix, Record Mic / Line In /
-A/V In, Record Level; on `ripples-all` ripples' Audio Source, Mic Gain and Line/AV Gain), not
-the headphone Volume.
+A/V In, Record Level; on `ripples-all` ripples' Audio Source, the preset of the Record rows, and
+Line/AV Gain, the level), not the headphone volume.
 
-Flow: HDMI Out Audio On (`setting.ini [hdmi] audio_out=1`, stored by the Audio page; by hand on
-`ripples-all`) ->
+Flow: HDMI Out Audio On (`setting.ini [hdmi] audio_out=1`, stored by the Audio page) ->
 restart -> the boot step (4a) -> `hdmi_audio_load()` at app start reads the record
 (`hdmi_boot_app_start()`) and configures the IT66121 driver with what is in effect ->
 `IT66121_init()` programs audio -> `hdmi_audio_apply(hdmi_in_shown)` (after
@@ -367,14 +357,10 @@ audio off for the rest of the boot ("audio path failed").
 
 ### HDMI-in audio as a mixer source: headphones and recording (HDMI In Audio = On)
 
-**On `ripples-all`** (until the Audio page's extension, phase 3) this subsection is `all`'s
-design. Here `hdmi_audio_line_out()` uses ripples' codec routing instead of the mixer: on, the
-DAC switches (`DACL Mixer AIF1DA0L`, `DACR Mixer AIF1DA0R`), `audio_sel.sh out_linein_off`,
-`out_dac_on`, `out_on`, then `dvr_set_dvr_audio_volume()`: the tone is heard on the line out at
-the Audio page's **DVR Playback** volume, without the analog line in; off, `out_dac_off` and
-`out_off` (what ripples' HDMI in leaves); set again after a record daemon restart. It is not
-recorded (nothing switches the output mixer into the ADC), so the device test's step 2 does not
-apply, and step 1's level is the DVR Playback volume.
+**On `ripples-all`** as described here (the audio mixer, docs/audio.md). The line-out volume is
+ripples' Live Volume, the ADC input gain ripples' Line/AV Gain. DVR playback (ripples' own code,
+the mixer held meanwhile) takes the DAC for itself, and the mixer puts HDMI-in audio back
+afterwards.
 
 While HDMI in is shown, the bridge plays the I2S2 capture (`hw:snddaudio2`) into the
 internal codec's DAC (`plughw:audiocodec`, 48 kHz). From the DAC it enters the codec's
@@ -448,12 +434,6 @@ SD card):
   `IT66121_close()`.
 
 ## 6. Switching it on (experimental)
-
-On `ripples-all`, until the Audio page's extension (phase 3): no rows yet. Over SSH (WiFi
-Module > System > SSH) put `audio_out=1` and/or `audio_in=1` under `[hdmi]` in
-`/mnt/app/setting.ini` (exactly `1`; anything else is off) and restart; set `0` (or remove the
-lines) and restart to switch off. What follows describes `all`'s rows; the rest (the boot step,
-the checks, the reasons in the log) is the same.
 
 **Audio > HDMI Audio (experimental)**, on the Goggle 1, the Goggle 2 and the BoxPro (the
 paths are unproven on all three: leave both Off until the read-only probe has run on the
