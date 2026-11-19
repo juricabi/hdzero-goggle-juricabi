@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "avshare.h"
 #include "confparser.h"
@@ -305,6 +306,10 @@ static void record_closeFile(RecordContext_t *recCtx, const char *reason) {
                 (unsigned long long)bytes);
     FFPackCloseResult_t result = ffpack_close(recCtx->ff);
     recCtx->ff = NULL;
+    // juricabi: onto the card now. Closing left the clip's end and its directory entry in the kernel's
+    // write cache for up to half a minute (the app's next start synced them): a card pulled, or the goggle
+    // switched off, soon after a stop lost the clip (0 bytes, its data as lost chains: the owner's card).
+    sync();
     rec_dbg_log("record_close end reason=%s file='%s' flush=%d trailer=%d io=%d",
                 reason, filePath, result.flush, result.trailer, result.io);
 }

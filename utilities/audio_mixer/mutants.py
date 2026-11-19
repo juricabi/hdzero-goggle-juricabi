@@ -173,7 +173,7 @@ MUTANTS = [
     ("juricabi.1: rec_mix left in setting.ini", M, [("        ini_puts(AUDIO_MIXER_SECTION, \"rec_mix\", NULL, SETTING_INI);\n", "")]),
     ("juricabi.1: Record Level 0 dB whatever was recorded", M, [
         ("            mixer.value[AUDIO_MIXER_REC_LEVEL] = more_than_mic ? clamp_field(AUDIO_MIXER_REC_LEVEL, rec->linein_gain) : 3;",
-         "            mixer.value[AUDIO_MIXER_REC_LEVEL] = 3;")]),
+         "            (void)more_than_mic;\n            mixer.value[AUDIO_MIXER_REC_LEVEL] = 3;")]),
     ("juricabi.1: Record Level ignores the mix", M, [
         ("            const bool more_than_mic = rec_mix > 0 || mixer.value[AUDIO_MIXER_REC_LINE_IN] || mixer.value[AUDIO_MIXER_REC_AV];",
          "            const bool more_than_mic = mixer.value[AUDIO_MIXER_REC_LINE_IN] || mixer.value[AUDIO_MIXER_REC_AV];")]),

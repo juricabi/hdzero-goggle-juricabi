@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -476,8 +477,21 @@ void dvr_star() {
 // Append one line to a persistent DVR-format trace on the SD card so the rare
 // "MP4 setting recorded as .ts" handoff failure can be diagnosed from logs
 // after the fact. Best-effort: silently skipped when no card is mounted.
+//
+// juricabi: only while the goggle logs (Storage, Logging On; the recorder is told in record.conf, [record]
+// debug_log), and kept under DVR_DBG_LOG_MAX with one older copy. (ripples wrote it always, without end.)
+#define DVR_DBG_LOG      "/mnt/extsd/dvr_dbg.log"
+#define DVR_DBG_LOG_PREV "/mnt/extsd/dvr_dbg.log.1"
+#define DVR_DBG_LOG_MAX  (512 * 1024)
 static void dvr_dbg_log(const char *fmt, ...) {
-    FILE *fp = fopen("/mnt/extsd/dvr_dbg.log", "a");
+    if (!log_file_opened())
+        return;
+
+    struct stat st;
+    if (stat(DVR_DBG_LOG, &st) == 0 && st.st_size > DVR_DBG_LOG_MAX)
+        rename(DVR_DBG_LOG, DVR_DBG_LOG_PREV);
+
+    FILE *fp = fopen(DVR_DBG_LOG, "a");
     if (fp == NULL)
         return;
 
@@ -646,6 +660,8 @@ static void dvr_update_record_conf() {
     }
     ini_putl("record", "naming", naming, REC_CONF);
     ini_putl("record", "rolling", g_setting.record.rolling ? 1 : 0, REC_CONF);
+    // the recorder's part of dvr_dbg.log: only while the goggle logs (Storage, Logging)
+    ini_putl("record", "debug_log", log_file_opened() ? 1 : 0, REC_CONF);
 
     // Only the ELRS naming scheme consumes race labels. Clear the pending
     // label when another scheme is selected so it cannot leak into a later
@@ -761,6 +777,7 @@ bool dvr_cmd(osd_dvr_cmd_t cmd) {
             dvr_dbg_log("stop_request cmd=%d", cmd);
             system_script(REC_STOP);
             wait_record_stopped("stop"); // (ripples: sleep(2))
+            sync();                      // the clip's thumbnail and the logs too (the recorder synced the clip)
         }
     }
 

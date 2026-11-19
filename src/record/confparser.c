@@ -6,19 +6,37 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "confparser.h"
 #include "minIni.h"
 
+// juricabi: the trace is written only while the goggle logs (Storage, Logging On: the app passes it as
+// [record] debug_log in the conf it writes before every start), and the file is kept under
+// REC_DBG_LOG_MAX with one older copy. (ripples wrote it always: a line with an fsync at every DVR start
+// and stop, without end.)
+#define REC_DBG_LOG      "/mnt/extsd/dvr_dbg.log"
+#define REC_DBG_LOG_PREV "/mnt/extsd/dvr_dbg.log.1"
+#define REC_DBG_LOG_MAX  (512 * 1024)
+static bool rec_dbg_enabled = false;
+
 // Persistent DVR-format trace shared with the goggle app (see dvr.c). Lets the
 // rare "MP4 recorded as .ts" handoff failure be diagnosed from the record
 // daemon's side after the fact. Best-effort; skipped when no card is mounted.
 void rec_dbg_log(const char* fmt, ...)
 {
-    FILE* fp = fopen("/mnt/extsd/dvr_dbg.log", "a");
+    if (!rec_dbg_enabled)
+        return;
+
+    struct stat st;
+    if (stat(REC_DBG_LOG, &st) == 0 && st.st_size > REC_DBG_LOG_MAX)
+        rename(REC_DBG_LOG, REC_DBG_LOG_PREV);
+
+    FILE* fp = fopen(REC_DBG_LOG, "a");
     if (fp == NULL)
         return;
 
@@ -436,6 +454,8 @@ void conf_loadRecordParams(char* confFile, RecordParams_t* para)
         memset(para->packPath, 0, sizeof(para->packPath));
         snprintf(para->packPath, MAX_pathLEN, "%s%s", para->diskPath, REC_packPATH);
     }
+
+    rec_dbg_enabled = ini_getbool(SEC_RECORD, "debug_log", 0, confFile) != 0;
 
     lValue = ini_gets(SEC_RECORD, KEY_TYPE, REC_packTYPE, sTemp, sizearray(sTemp), confFile);
     {
