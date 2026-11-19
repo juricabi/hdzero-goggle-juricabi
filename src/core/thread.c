@@ -151,6 +151,10 @@ static void check_source_signal(int vtmg_change) {
         g_setting.ht.alarm_on_video = is_valid;
     }
 
+    // the backpack's DVR control (src/core/dvr_auto.h): every pass, also in Record Mode Manual and
+    // while a menu is open (a command that came meanwhile, its delays)
+    dvr_auto_tick(is_valid);
+
     // exit if no SD card or not in video mode
     if (g_setting.record.mode_manual || (!g_sdcard_enable) || (g_app_state != APP_STATE_VIDEO))
         return;
@@ -213,9 +217,11 @@ static void check_source_signal(int vtmg_change) {
             cnt++;
             if (cnt >= SIGNAL_ACCQ_DURATION_THR) {
                 cnt = 0;
-                LOGI("Signal accquired");
                 sdcard_update_free_size();
-                if (dvr_space_allows_start()) {
+                // not after the backpack's disarm, nor after a stop by the button while the picture
+                // stayed (src/core/dvr_auto.h); ripples started a recording a second later then
+                if (dvr_space_allows_start() && dvr_auto_picture_start_allowed()) {
+                    LOGI("Signal accquired");
                     dvr_cmd(DVR_START);
                 }
             }

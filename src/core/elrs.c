@@ -85,8 +85,6 @@ static uint8_t crc;
 static int fd_esp32 = -1;
 static sem_t response_semaphore;
 static mspPacket_t response_packet;
-static int record_state;
-static uint32_t record_time = 0;
 static bool headtracking_enabled = false;
 static volatile bool cancelled = false;
 
@@ -367,13 +365,6 @@ bool esp32_handler_process_byte(uint8_t c) {
     return false;
 }
 
-void esp32_handler_timeout() {
-    if (record_time != 0 && record_time <= time(NULL)) {
-        record_time = 0;
-        dvr_cmd(record_state);
-    }
-}
-
 // The analog channel (1..48) of the answers to MSP_GET_BAND_CHAN / MSP_GET_FREQ: a bay module's own
 // channel while the goggle tunes it (src/module/module.h), otherwise the stored one, as ripples
 // answered. (For a bay or Expansion module the goggle does not control, Goggle 1 Module None or Goggle 2
@@ -511,27 +502,11 @@ void msp_process_packet() {
         } break;
         case MSP_SET_REC_STATE: {
             g_setting.ht.alarm_on_arm = packet.payload[0];
-            if (g_app_state == APP_STATE_VIDEO) {
-                record_state = packet.payload[0] == 0 ? 1 : 2;
-                uint32_t delay = packet.payload[1] | (uint32_t)packet.payload[2] << 8;
-                if (delay == 0) {
-                    record_time = 0;
-                    dvr_cmd(record_state);
-                }
-                else {
-                    switch (record_state) {
-                    case DVR_STOP:
-                        if (!dvr_is_recording && !record_pending) {
-                            // discard "timer off" if dvr not already started
-                            record_time = 0;
-                            break;
-                        }
-                    // fall thru' if dvr started
-                    case DVR_START:
-                        record_time = time(NULL) + delay;
-                    }
-                }
-            }
+            // The automatic DVR keeps it (src/core/dvr_auto.h): also from a menu, also while the goggle is
+            // busy; the delay runs on the goggle's clock. (ripples acted on it only in the video view and
+            // at once, and ran the delay in esp32_handler_timeout(): only while the backpack was quiet.)
+            const unsigned delay = packet.payload_size >= 3 ? (unsigned)(packet.payload[1] | packet.payload[2] << 8) : 0;
+            dvr_auto_backpack_cmd(packet.payload[0] != 0, delay);
         } break;
         case MSP_GET_VRX_MODE:
             break;

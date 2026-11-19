@@ -1087,7 +1087,21 @@ void main_loop(RecordContext_t *recCtx, bool retryLegacyConf) {
     gogglemsg_init(false, MTYPE_RECORD);
     gogglemsg_flush(MTYPE_RECORD);
 
+    // juricabi: a slow part of a pass is logged (dvr_dbg.log): the app's DVR control waits for this loop
+    // to pick up its commands, and every menu, source and channel switch waits for a PAUSE
+    uint32_t tkSlowLogged = 0;
+#define REC_SLOW_MS 200
+#define REC_SLOW_LOG(what, began)                                                                   \
+    do {                                                                                            \
+        const uint32_t tkTook = get_tickCount() - (began);                                          \
+        if (tkTook >= REC_SLOW_MS && get_tickCount() - tkSlowLogged >= 2000) {                      \
+            rec_dbg_log("slow %s: %u ms", (what), (unsigned)tkTook);                                \
+            tkSlowLogged = get_tickCount();                                                         \
+        }                                                                                           \
+    } while (0)
+
     while (!isExit) {
+        const uint32_t tkPass = get_tickCount();
         int nMsg = gogglemsg_recv(MTYPE_RECORD);
 
         switch (nMsg) {
@@ -1165,12 +1179,17 @@ void main_loop(RecordContext_t *recCtx, bool retryLegacyConf) {
             record_run(recCtx, REC_statStop);
             live_stop(recCtx);
             break;
-        default:
+        default: {
             // start live stream encoding if any clients connected
+            const uint32_t tkLive = get_tickCount();
             live_run(recCtx);
+            REC_SLOW_LOG("live_run", tkLive);
             usleep(100 * 1000);
             break;
         }
+        }
+        if (nMsg != MSG_none)
+            REC_SLOW_LOG("goggle message", tkPass);
 
         tkNow = get_tickCount();
         if (tkNow - tkIdle >= 500) {
@@ -1179,9 +1198,12 @@ void main_loop(RecordContext_t *recCtx, bool retryLegacyConf) {
             record_saveStatus(recCtx, REC_statusSave);
             record_run(recCtx, recCtx->stateGo);
             record_pack(recCtx);
+            REC_SLOW_LOG("disk / status pass", tkNow);
             tkIdle = tkNow;
         }
     }
+#undef REC_SLOW_LOG
+#undef REC_SLOW_MS
 
     gogglemsg_uninit();
 }

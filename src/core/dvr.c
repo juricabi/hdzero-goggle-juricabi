@@ -17,6 +17,7 @@
 #include "core/msp_displayport.h"
 #include "core/app_state.h"
 #include "core/audio_mixer.h"
+#include "core/dvr_auto.h"
 #include "core/settings.h"
 #include "driver/hardware.h"
 #include "driver/rtc.h"
@@ -370,7 +371,10 @@ void dvr_update_vi_conf(video_resolution_t fmt) {
     LOGI("update_record_vi_conf: fmt=%d", fmt);
 }
 
+static void auto_button_press(void);
+
 void dvr_toggle() {
+    auto_button_press(); // the pilot's press: the automatic DVR leaves it alone (src/core/dvr_auto.h)
     dvr_cmd(DVR_TOGGLE);
 }
 
@@ -611,7 +615,7 @@ bool dvr_space_allows_start(void) {
     return g_setting.record.rolling || !sdcard_is_full();
 }
 
-void dvr_cmd(osd_dvr_cmd_t cmd) {
+bool dvr_cmd(osd_dvr_cmd_t cmd) {
     LOGI("dvr_cmd: sdcard=%d, recording=%d, cmd=%d", g_sdcard_enable, dvr_is_recording, cmd);
 
     bool start_rec = dvr_is_recording;
@@ -630,13 +634,16 @@ void dvr_cmd(osd_dvr_cmd_t cmd) {
 
     if (!g_sdcard_enable) {
         record_pending = start_rec;
-        return;
+        return true; // (started once a card is in: thread.c)
     }
 
+    bool taken = true;
     pthread_mutex_lock(&dvr_mutex);
 
     if (start_rec) {
-        if (!dvr_is_recording && dvr_space_allows_start()) {
+        if (!dvr_is_recording && !dvr_space_allows_start()) {
+            taken = false; // no room on the card
+        } else if (!dvr_is_recording) {
             dvr_update_record_conf();
             // Re-assert the record-OSD bit at the exact point recording starts.
             // Display/UI transitions can reinitialize this FPGA register after
@@ -677,4 +684,94 @@ void dvr_cmd(osd_dvr_cmd_t cmd) {
     }
 
     pthread_mutex_unlock(&dvr_mutex);
+    return taken;
+}
+
+/*
+ * Automatic DVR (src/core/dvr_auto.h): the backpack's recording control, Record Mode Auto and the DVR
+ * button. The state is changed by the ELRS thread (backpack), the peripheral thread (every pass) and
+ * the input thread (button); dvr_cmd() is called outside auto_lock.
+ */
+static pthread_mutex_t auto_lock = PTHREAD_MUTEX_INITIALIZER;
+static dvr_auto_t auto_state; // zero: no backpack command yet (DVR_AUTO_ARM_NONE)
+
+static uint64_t monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+static void auto_env(dvr_auto_env_t *env) {
+    env->now_ms = monotonic_ms();
+    env->in_video = g_app_state == APP_STATE_VIDEO;
+    env->recording = dvr_is_recording || record_pending;
+    env->storage_ok = g_sdcard_enable && g_sdcard_ready && dvr_space_allows_start();
+    env->auto_mode = !g_setting.record.mode_manual;
+}
+
+static void auto_act(dvr_auto_action_t action, const char *why) {
+    if (action == DVR_AUTO_STOP) {
+        LOGI("DVR auto: stop (%s)", why);
+        dvr_cmd(DVR_STOP);
+    } else if (action == DVR_AUTO_START) {
+        const uint64_t now = monotonic_ms();
+        if (dvr_cmd(DVR_START)) {
+            LOGI("DVR auto: start (%s)", why);
+        } else {
+            static uint64_t logged_ms;
+            if (now - logged_ms >= 5000) { // (tried again every second)
+                LOGI("DVR auto: start (%s) refused: no room on the card, trying again", why);
+                logged_ms = now;
+            }
+            pthread_mutex_lock(&auto_lock);
+            dvr_auto_refused(&auto_state, now);
+            pthread_mutex_unlock(&auto_lock);
+        }
+    }
+}
+
+static void auto_button_press(void) {
+    // as dvr_cmd(DVR_TOGGLE) decides (not under dvr_mutex: dvr_cmd() holds it through its waits)
+    const bool stopping = dvr_is_recording || record_pending;
+    pthread_mutex_lock(&auto_lock);
+    dvr_auto_button(&auto_state, stopping);
+    pthread_mutex_unlock(&auto_lock);
+    LOGI("DVR auto: button %s", stopping ? "stop" : "start");
+}
+
+void dvr_auto_backpack_cmd(bool on, unsigned delay_s) {
+    dvr_auto_env_t env;
+    auto_env(&env);
+    pthread_mutex_lock(&auto_lock);
+    const dvr_auto_action_t action = dvr_auto_backpack(&auto_state, on, delay_s, &env);
+    pthread_mutex_unlock(&auto_lock);
+    LOGI("DVR auto: backpack %s, delay %u s (video view %d, recording %d, card %d, Record Mode %s)", on ? "start" : "stop",
+         delay_s, env.in_video, env.recording, env.storage_ok, env.auto_mode ? "Auto" : "Manual");
+    auto_act(action, "backpack");
+}
+
+void dvr_auto_tick(bool picture) {
+    dvr_auto_env_t env;
+    auto_env(&env);
+    pthread_mutex_lock(&auto_lock);
+    const dvr_auto_arm_t before = auto_state.arm;
+    const dvr_auto_action_t action = dvr_auto_step(&auto_state, &env, picture);
+    const dvr_auto_arm_t after = auto_state.arm;
+    pthread_mutex_unlock(&auto_lock);
+    if (before != after)
+        LOGI("DVR auto: backpack %s (its start delay passed)", dvr_auto_arm_name(after));
+    auto_act(action, after == DVR_AUTO_ARM_ON ? "armed" : "the backpack's stop delay passed");
+}
+
+bool dvr_auto_picture_start_allowed(void) {
+    pthread_mutex_lock(&auto_lock);
+    const bool allowed = dvr_auto_picture_may_start(&auto_state);
+    const bool user_stopped = auto_state.user_stopped;
+    pthread_mutex_unlock(&auto_lock);
+    static bool logged;
+    if (!allowed && !logged)
+        LOGI("DVR auto: Record Mode Auto does not start a recording (%s)",
+             user_stopped ? "stopped by the button, until the picture was gone" : "the backpack is disarmed");
+    logged = !allowed;
+    return allowed;
 }

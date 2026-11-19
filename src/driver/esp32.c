@@ -37,7 +37,7 @@ static void *pthread_recv_esp32(void *arg) {
     int i, len = 0;
     uint8_t buffer[128];
     fd_set rd;
-    struct timeval tv = {0, 100000};
+    struct timeval tv;
 
     // Init UART buffers
     uart3_rptr = 0;
@@ -47,6 +47,10 @@ static void *pthread_recv_esp32(void *arg) {
     LOGI("UART3:starting reader thread");
 
     for (;;) {
+        // Linux select() leaves the time not slept in tv: set every time, or after the first quiet
+        // 100 ms the loop polled with a zero timeout, one CPU core busy for as long as the backpack is on
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000;
         FD_ZERO(&rd);
         FD_SET(fd_esp32, &rd);
         if (stopping) {
@@ -72,8 +76,8 @@ static void *pthread_recv_esp32(void *arg) {
             }
             if (len)
                 esp32_rx();
-        } else
-            esp32_handler_timeout();
+        }
+        // (the backpack's DVR delays run on the goggle's clock now: src/core/dvr_auto.h)
     }
     return NULL;
 }

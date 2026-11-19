@@ -35,7 +35,14 @@ bool dvr_live_audio_is_enabled(void);
 // recording enabled the recorder frees space itself, so a nearly full card is no
 // longer a reason to refuse the start.
 bool dvr_space_allows_start(void);
-void dvr_cmd(osd_dvr_cmd_t cmd);
+// false: a start not taken (recorder unavailable, or a transition holds it paused)
+bool dvr_cmd(osd_dvr_cmd_t cmd);
+// Automatic DVR (src/core/dvr_auto.h): the backpack's recording command (MSP_SET_REC_STATE) ...
+void dvr_auto_backpack_cmd(bool on, unsigned delay_s);
+// ... every pass of the peripheral thread, with the source's picture ...
+void dvr_auto_tick(bool picture);
+// ... and whether Record Mode Auto may start a recording now (not after a disarm or a stop by the button)
+bool dvr_auto_picture_start_allowed(void);
 void dvr_update_vi_conf(video_resolution_t fmt);
 void dvr_toggle();
 void dvr_star();
