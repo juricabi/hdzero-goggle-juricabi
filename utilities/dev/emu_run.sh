@@ -5,7 +5,7 @@
 # then re-executes itself in a private mount namespace (unshare -m) where:
 #   /mnt is a fresh tmpfs (hides /mnt/c, /mnt/app); /mnt/app/language and /mnt/app/resource are
 #   read-only bind mounts of the worktree's; no /mnt/app/script; /mnt/extsd is an empty dir (or holds
-#   a copy of $EMU_EXTSD_FILE)
+#   a copy of $EMU_EXTSD_FILE); /mnt/app/version only with $EMU_APP_VERSION
 #   /tmp is a fresh tmpfs (the X socket dir bind-mounted back in)
 #   the emulator binary, the stubs and the run dir live in that private /tmp, owned by 65534
 # and the emulator runs as uid/gid 65534 with no groups, no capabilities (inheritable, ambient,
@@ -56,6 +56,10 @@ if [ -n "${EMU_EXTSD_FILE:-}" ]; then
   cp "$EMU_EXTSD_FILE" /mnt/extsd/ || { echo "EMU_EXTSD_FILE $EMU_EXTSD_FILE not copied"; exit 1; }
 fi
 chown -R 65534:65534 /mnt/extsd
+# EMU_APP_VERSION=<text>: /mnt/app/version (the Firmware page's Current Version; mkapp_ota.sh writes it in an image)
+if [ -n "${EMU_APP_VERSION:-}" ]; then
+  echo "$EMU_APP_VERSION" > /mnt/app/version
+fi
 
 ST=/tmp/stubs
 mkdir -p $ST

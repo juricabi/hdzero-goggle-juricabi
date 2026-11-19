@@ -1,0 +1,9 @@
+# Goggle 1, Goggle 2 or BoxPro, started in the main menu: the Firmware page (the 15th entry), its Current Version
+# row (EMU_APP_VERSION=<version> for emu_run.sh gives the emulator a /mnt/app/version)
+w 2
+k s 14
+w 1
+s v00_firmware_preview
+k d
+w 1
+s v01_firmware
