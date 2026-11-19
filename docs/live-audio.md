@@ -9,7 +9,8 @@ they share `record`, `rtspLive`, the record conf and the WiFi page.
 
 **On `ripples-all`** (ripples' firmware 1.2.2 with this project's additions, docs/status.md): ported
 from `all` (082b2f5). `rtspLive` and the ring are `all`'s code (ripples had upstream's, but for
-its flush in the writer's `avshare_reset()`, which is kept). ripples reworked the recorder
+its flush in the writer's `avshare_reset()`, kept for the video side of the ring; since phase 4 the
+audio side is left to the stream audio's writer, docs/status.md). ripples reworked the recorder
 (`src/record/main.c`: the DVR control queue, rolling recordings), and the stream's hooks are
 merged into it: `live_run()` (after ripples' pause check), the AI device's users
 (`aidev_heldByOthers()`), `vvLive_onFrame()`'s clock, the stream's conf. The input is
@@ -145,8 +146,9 @@ file), `ADTSAudioStreamDiscreteFramer` (*adds* ADTS headers).
   between); a failed start is retried after 5 s; a running chain that produces no frame for 2 s
   is stopped and started again. On `ripples-all` the poll comes after ripples' pause check:
   while the recorder is paused around a source switch the chain is neither started nor stopped
-  (it runs on; ripples' `avshare_reset()` then flushes the ring and the reader resynchronises,
-  `t_pause.sh`).
+  (it runs on; ripples' `avshare_reset()` then flushes the video side of the ring for the new
+  video bitstream, and leaves the audio side to the stream audio's writer: no audio frame is
+  lost, `t_pause.sh`).
 - The chain captures from the same `[ai] device` as recording: the stream carries what the DVR
   records (the Audio page's recording rows). HDMI-in audio is in it only with HDMI In Audio and
   Record Headphone Mix on (docs/hdmi-audio.md).
@@ -266,7 +268,7 @@ presentation times.
 | On, recording with audio / AI->AO loop at the same time | all run; start/stop of one does not stop the others or disable the device under them |
 | Client paused / slow | ring holds ~1.2 s of audio, then drops new frames; reader skips frames older than 1 s |
 | rtspLive killed / crashed | record stops the live video encoder within ~0.5 s and the audio chain 3 s later |
-| `ripples-all`: a source switch while streaming (the recorder paused, then resumed) | live video stops and comes back; the audio runs on (no gap over one frame) |
+| `ripples-all`: a source switch while streaming (the recorder paused, then resumed) | live video stops and comes back; the audio runs on (no frame lost: no pts gap over 1.5 AAC frames, 32 ms) |
 | Several clients | one shared source per track (`reuseFirstSource`), the ring has one reader per media |
 
 ## 3. Tests on the build host
@@ -303,7 +305,7 @@ libx265, python3, qemu-arm). The programs use the goggle's fixed paths and IPC k
 | `t_off_identical.sh` | Stream Audio off: SDP (but `o=`) and RTP packets (marker, size, payload header, timestamp steps) identical to the 8364a43 rtspLive, H.264 and H.265 |
 | `t_arm.sh` | the shipped ARM rtspLive (live555 2022.12.01) under qemu-arm: `t_e2e.sh` 38/38, `t_describe.sh` 12/12 (2.82 s / 2.51 s / overlap +2.51 s / 0.57 s with audio), `t_kill.sh` 15/15 |
 | `t_snapshot.sh` (`ripples-all`) | `ctl_conf` publishes a config snapshot and sends `RECORD_CONFIG` like the app's DVR control; then Stream Audio changes in the recorder's start file: snapshot `audio=0` + Stream Audio On -> SDP with audio, the chain starts, frames reach the ring; snapshot `audio=1` + Stream Audio Off -> video-only SDP, "audio is off", no chain. 9/9; without the fix 2/9 (the recorder followed the snapshot) |
-| `t_pause.sh` (`ripples-all`) | while a client streams with audio, `ctl_conf` pauses the recorder (`RECORD_PAUSE`, as the app does before a source switch: live video stops, ripples' `avshare_reset()` flushes both sides of the ring) and resumes it 2 s later (`RECORD_LIVE_STOP` with a snapshot): the audio chain keeps running, the stream's audio has no gap over 21 ms (one frame) and stays in order (the reader resynchronises after the flush), video is back after the resume. 7/7 |
+| `t_pause.sh` (`ripples-all`) | while a client streams with audio, `ctl_conf` pauses the recorder (`RECORD_PAUSE`, as the app does before a source switch: live video stops, `avshare_reset()` flushes the video side of the ring) and resumes it 2 s later (`RECORD_LIVE_STOP` with a snapshot): the audio chain keeps running, no audio frame is lost (no pts gap over 32 ms, 1.5 AAC frames of 21.3 ms) and the audio stays in order, video is back after the resume. 7/7 |
 
 Not testable without a goggle: the MPP AI/AENC chain itself (two or three AI channels at once,
 its real ADTS output and timestamps, chunk sizes, capture jitter), the VI pts clock, the

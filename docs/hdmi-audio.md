@@ -253,8 +253,9 @@ PH_CFG0 = 0x35517751 (same script and value on every target) and before the reco
 or the app start. It decides what is in effect for **this boot** and writes the record
 `/tmp/hdmi_audio.boot` (RAM: `version`, the kernel's `boot_id`, `phase` check/done,
 `supported`, `audio_out`, `audio_in`, `pins`, `fault`, `ph_cfg0`, `detail`), which the app
-and the record daemon read. Only `[hdmi] audio_out` exactly `1` makes it touch PH_CFG0, and
-then by the strict rule: the whole register must read (three agreeing reads in the
+and the record daemon read. Only `[hdmi] audio_out` exactly `1` makes it touch PH_CFG0, only
+with the read-only probe's GO for this board on the SD card (section 7; without it: "probe not
+run", PH_CFG0 neither read nor written, `pins=untouched`), and then by the strict rule: the whole register must read (three agreeing reads in the
 driver's exact format, under the `sunxi_dump` lock) as 0x35517751 (stock) or 0x35513331
 (only PH1-PH3 = function 3); the value written is one of these two constants, never built
 from a read; after the write three agreeing reads must give 0x35513331, else the stock value
@@ -436,8 +437,11 @@ SD card):
 ## 6. Switching it on (experimental)
 
 **Audio > HDMI Audio (experimental)**, on the Goggle 1, the Goggle 2 and the BoxPro (the
-paths are unproven on all three: leave both Off until the read-only probe has run on the
-device). The switches only store the
+paths are unproven on all three). **HDMI Out Audio can be switched on only after the read-only
+probe has given this board its GO** (section 7): without `hdmi_audio_go.txt` on the SD card for
+this board the row is greyed (it can still be switched Off), its hint says "Run the HDMI audio
+probe first (hdmi-audio.md, 7)", and the boot step refuses `audio_out=1` set by hand ("probe not
+run", PH_CFG0 neither read nor written). The switches only store the
 setting (exactly `1` or `0`); nothing touches a pin function, I2S0 or the IT66121 because
 one was clicked. Both take effect at the next start:
 
@@ -448,7 +452,8 @@ one was clicked. Both take effect at the next start:
 
 The page shows an orange **Restart** next to a switch whose position differs from what is in
 effect this boot, and **Error** next to HDMI Out Audio when it was On at this start but
-stayed off; its hint then reads "Off at this start: " and the reason: "pin check failed"
+stayed off; its hint then reads "Off at this start: " and the reason: "probe not run" (no GO
+of the probe for this board), "pin check failed"
 (the boot step refused or did not verify, or there is no valid record of this boot), "HDMI
 chip check failed" (the Reg04 guard, section 3) or "audio path failed" (the record daemon
 refused the route or never confirmed it). The keys can still be set by hand in
@@ -465,7 +470,21 @@ answer. `record.conf [hdmi_audio] latency_ms` (default 60) stays tunable.
 
 See `utilities/probe/README.md`. In short: copy `hdmi_audio_probe.sh` to the SD card as
 `develop.sh`, boot, wait for 2 beeps and 2 more minutes, send `hdmi_audio_probe_N.txt` and
-`hdmi_audio_dmesg_N.txt`. Optional: `hdmi_audio_test.sh` (tone to HDMI out, 10 s HDMI in
+`hdmi_audio_dmesg_N.txt`.
+
+**The GO for HDMI Out Audio.** At the end of its part 1 the probe gives HDMI Out Audio a verdict for
+this board, from what it read (it writes no register): GO only if `snddaudio0` is a sound card, the
+`sunxi_dump` latch reads PH_CFG0 as 0x35517751 (rc.sh) or 0x35513331 (switched this boot) in the
+format the boot step accepts, `/dev/mem` (where it can be read) agrees, and the kernel's
+`pinmux-pins` lists PH1, PH2 and PH3 with no driver but uart4 (PH1) or daudio0, and no GPIO user.
+GO writes `hdmi_audio_go.txt` on the SD card (`hdmi_audio_probe=GO`, `board=<id>`, the probe's
+version, PH_CFG0); NO-GO removes an earlier one and the report says why. The board id is the
+first of `/sys/class/sunxi_info/sys_info`'s `sunxi_chipid` and `sunxi_serial` and `/proc/cpuinfo`'s
+`Serial` that is 1..64 letters and digits and not all zeros, else `unknown`; the boot step and the
+Audio page read it the same way (`hdmi_boot_board_id()`), so a GO on an SD card moved to another
+goggle does not count. (A goggle with no readable id is `unknown`: its GO counts on any goggle
+without one.) The GO is about the SoC side only: whether PH1-PH3 reach the IT66121, and nothing
+else, on the board is what no probe can read (sections 1 and 9). Optional: `hdmi_audio_test.sh` (tone to HDMI out, 10 s HDMI in
 recording) and `bay_gpio_pattern.sh` (module-bay pin finder, bay empty). Please do it on
 both a Goggle 1 and a Goggle 2.
 
@@ -473,6 +492,7 @@ both a Goggle 1 and a Goggle 2.
 
 | probe / test result | HDMI out audio | HDMI in audio |
 |---|---|---|
+| probe: "HDMI Out Audio verdict: NO-GO: ..." | HDMI Out Audio stays off (no GO on the SD card): the reasons are the rows below | - |
 | `/proc/asound/cards` lacks `snddaudio0` | daudio0 failed to probe (dmesg `daudio`/pinctrl lines): needs a kernel/DT change | - |
 | `/proc/asound/cards` lacks `snddaudio2` | - | same for daudio2 |
 | `pinmux-pins`: PH1 owned by the uart (5001000.uart) | the boot step's raw switch of PH_CFG0 is required (as implemented); a DT fix would be cleaner | - |
