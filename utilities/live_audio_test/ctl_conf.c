@@ -1,7 +1,10 @@
 // Stands in for the app's DVR control on ripples-all (src/core/dvr.c): publishes a config snapshot the way it
 // does (a copy of the given file as /tmp/hdz-dvr-control/<pid>/record-<n>.conf, directory 0700, file 0600) and
-// sends RECORD_CONFIG on ripples' record control queue (lib/log record_control.c); prints the recorder's answer.
-// usage: ctl_conf <conf file> [n]      exit 0 = the recorder accepted the snapshot
+// sends RECORD_CONFIG (or the command given) on ripples' record control queue (lib/log record_control.c); prints
+// the recorder's answer.
+// usage: ctl_conf <conf file> [n] [config|live_stop|pause]   exit 0 = the recorder accepted it
+//   pause: what the app sends before a source switch (the recorder stops live video and waits);
+//   live_stop: what it sends after one, with a snapshot (the recorder carries on)
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,10 +17,22 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <conf file> [n]\n", argv[0]);
+        fprintf(stderr, "usage: %s <conf file> [n] [config|live_stop|pause]\n", argv[0]);
         return 2;
     }
     const unsigned n = argc > 2 ? (unsigned)atoi(argv[2]) : 1u;
+    const char *name = argc > 3 ? argv[3] : "config";
+    unsigned command;
+    if (strcmp(name, "config") == 0)
+        command = RECORD_CONFIG;
+    else if (strcmp(name, "live_stop") == 0)
+        command = RECORD_LIVE_STOP;
+    else if (strcmp(name, "pause") == 0)
+        command = RECORD_PAUSE;
+    else {
+        fprintf(stderr, "unknown command %s\n", name);
+        return 2;
+    }
     char dir[64], path[RECORD_CONTROL_PATH];
     if (mkdir("/tmp/hdz-dvr-control", 0700) < 0 && errno != EEXIST) {
         perror("mkdir /tmp/hdz-dvr-control");
@@ -55,7 +70,7 @@ int main(int argc, char **argv) {
     }
     record_control_request_t request = {.type = RECORD_CONTROL_TYPE, .magic = RECORD_CONTROL_MAGIC,
         .owner = (unsigned)getpid(), .cookie = ((unsigned)getpid() ^ (unsigned)time(NULL)) | 1u,
-        .sequence = 1, .command = RECORD_CONFIG};
+        .sequence = 1, .command = command};
     snprintf(request.config, sizeof(request.config), "%s", path);
     if (record_control_send(q, &request) != 0) {
         perror("record_control_send");
@@ -69,11 +84,11 @@ int main(int argc, char **argv) {
             return 1;
         }
         if (r > 0) {
-            printf("CONFIG %s: error %d, recorder %u\n", path, (int)reply.error, (unsigned)reply.recorder);
+            printf("%s %s: error %d, recorder %u\n", name, path, (int)reply.error, (unsigned)reply.recorder);
             return reply.error != 0;
         }
         usleep(10000);
     }
-    printf("CONFIG %s: no answer within 5 s\n", path);
+    printf("%s %s: no answer within 5 s\n", name, path);
     return 1;
 }

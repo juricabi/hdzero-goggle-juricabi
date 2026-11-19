@@ -13,7 +13,7 @@ run "$BIN/ring_test"
 run "$LAT_DIR/t_aidev.sh"
 if [ -x "$BIN/ring_test.arm" ] && command -v qemu-arm > /dev/null; then run qemu-arm "$BIN/ring_test.arm"; fi
 if [ -x "$BIN/rtspLive" ]; then
-    for t in t_describe.sh t_kill.sh t_share.sh t_e2e.sh t_avsync.sh t_audio_fail.sh t_cpu.sh t_off_identical.sh t_snapshot.sh; do
+    for t in t_describe.sh t_kill.sh t_share.sh t_e2e.sh t_avsync.sh t_audio_fail.sh t_cpu.sh t_off_identical.sh t_snapshot.sh t_pause.sh; do
         run "$LAT_DIR/$t"
     done
 fi
