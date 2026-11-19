@@ -123,9 +123,10 @@ over MSP in analog mode. With module control:
   the status bar and the Source page, on the Goggle 1 too (ripples: no analog
   channel on the Goggle 1);
 * an uncontrolled bay module (Module None, the default, or WiFi on) stays as in
-  ripples: no channel shown, nothing applied, MSP GET_BAND_CHAN / GET_FREQ answer
-  255 / 0 Hz (the backpack's "unknown"); also the Goggle 2's status bar shows no
-  channel then (ripples showed the built-in receiver's);
+  ripples: no channel shown, nothing applied, and MSP GET_BAND_CHAN / GET_FREQ answer
+  the stored channel as ripples did (until phase 4 they answered 255 / 0 Hz; the review
+  of phase 3 found that undocumented, and the module bay does not need it); the
+  Goggle 2's status bar shows no channel then (ripples showed the built-in receiver's);
 * Goggle 2: the bay module's channel is a new key, `[module] channel`;
   `[source] analog_channel` keeps its meaning (the built-in receiver);
 * `Analog_Module_Power()` sends its first command at the app start also when the bay
@@ -378,8 +379,9 @@ ExpressLRS Backpack's `targets/`.
   goggle tunes the analog source (built-in receiver, or a controlled bay module);
   a Switch module gets the channel's place in its band (A1, B1 ... L1 all select
   CH1).
-* MSP_GET_BAND_CHAN / GET_FREQ: the analog channel; 255 / 0 for an uncontrolled
-  bay module.
+* MSP_GET_BAND_CHAN / GET_FREQ: the analog channel (the bay module's own one while the
+  goggle tunes it); for an uncontrolled bay module the stored channel, as ripples answered
+  (`msp_band_chan_answer()`, `msp_freq_answer()`; `utilities/module_bay_test/test_msp_answers.py`).
 * Dial long-press confirm and ELRS page "Send VTX freq": the analog channel.
 
 ## Host tests (no hardware)

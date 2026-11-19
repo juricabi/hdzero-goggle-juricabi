@@ -31,8 +31,10 @@ phase 3, lists every overlap and how it was resolved.
 * A goggle coming from ripples 1.2.2 behaves as before until a row of the extras is changed.
   One coming from all's firmware keeps what its Audio page set. A fresh install gets ripples'
   defaults. Leaving the page without a change writes nothing (section "Settings").
-* DVR playback and the test buttons run ripples' own codec code. The mixer is held meanwhile and
-  sets its state again afterwards.
+* DVR playback and the test buttons run ripples' own codec code. The mixer is held meanwhile: it
+  first takes its own live paths out of the codec's mixers (the headphone sources of the page and
+  the recorded mix), so that only what ripples' code routes is heard or recorded, and it sets its
+  whole state again afterwards.
 
 ## The Audio page
 
@@ -45,7 +47,7 @@ Test is selected).
 | (ripples) | Record Audio | Yes / No | `[record] audio` | Yes |
 | | Audio Source (greyed and skipped while Record Audio is No, as on ripples) | Mic / Line In / A/V In | `[record] audio_source` | Mic |
 | Volume Control (ripples) | DVR Playback | 0..8 | `[record] dvr_audio_volume_v2` | 8 |
-| | Live Volume | 0..10 | `[record] live_audio_volume` | 10 |
+| | Live Volume (hint: "Headphone volume. Also sets the A/V In level") | 0..10 | `[record] live_audio_volume` | 10 |
 | | Mic Gain | 0..7 | `[record] mic_gain` | 4 |
 | | Line/AV Gain | 0..7 | `[record] linein_gain` | 3 |
 | | Run Test | DVR, Live, Mic, Line/AV | - | - |
@@ -58,7 +60,7 @@ Test is selected).
 | | Record Line In | Yes / No, "Mix" | `[mixer] rec_line_in` | by Audio Source |
 | | Record A/V In | Yes / No, "Mix" | `[mixer] rec_av` | by Audio Source |
 | Inputs (Goggle 2, BoxPro) | Built-in RX Audio | On / Off | `[mixer] rx_audio` | On only with Audio Source A/V In |
-| HDMI Audio (experimental; from the next start) | HDMI Out Audio | On / Off | `[hdmi] audio_out` | Off |
+| HDMI Audio (experimental; from the next start) | HDMI Out Audio (On only with the HDMI audio probe's GO for this board, docs/hdmi-audio.md section 7) | On / Off | `[hdmi] audio_out` | Off |
 | | HDMI In Audio | On / Off | `[hdmi] audio_in` | Off |
 | | < Back | | | |
 
@@ -83,9 +85,13 @@ What each of ripples' rows does on the codec:
 * **DVR Playback** is ripples' playback volume (line-out table and DAC volume), used by ripples'
   playback code (`player/adec2ao.c`) and the DVR test as before.
 * **Record Audio** is unchanged: whether the DVR records audio at all.
-* **Run Test**: ripples' four tests, unchanged. They run ripples' own codec code: the mic or line
-  into the ADC, the DAC to the line out. The mixer is held during a test, and afterwards it puts
-  the page's routing back. ripples instead restored its source and its line out itself.
+* **Run Test**: ripples' four tests. They run ripples' own codec code: the mic or line into the ADC,
+  the DAC to the line out. The mixer is held during a test (the page's own live paths out first:
+  a Mic test records the mic alone, also with Record Headphone Mix on), and afterwards it puts the
+  page's routing back. ripples instead restored its source and its line out itself. A Mic or
+  Line/AV test that records nothing (the audio input held by Stream Audio or HDMI Out Audio, whose
+  capture the record daemon has open) says so in place of the note: "Nothing recorded: audio input
+  busy (Stream Audio, HDMI Out Audio)"; ripples played back nothing without a word.
 
 Sliders: click to grab, turn, click to release; the value applies while it moves (ripples applied
 on release). DVR Playback is stored on release, as on ripples, and used by the next playback.
@@ -158,9 +164,17 @@ DVR playback is ripples' own code. `player/adec2ao.c` mutes the live audio
 (`dvr_mute_live_audio()`) and sets the DVR Playback volume, so playback runs as on ripples, which
 plays the file's left channel through libmedia_mpp's route. `ui_player.c` holds the mixer from
 before `media_init()` (whose `AW_MPI_SYS_Init` resets part of the mixer) until after
-`media_exit()`. While held, the mixer writes no batch and does not watch the codec. Released, it
-applies its state and waits for the codec. The four test buttons do the same around ripples' test
-code. They use ripples' raw routing of one source (`dvr_test_select_audio_source()`) and ripples'
+`media_exit()`. The first hold writes one small batch: the output mixers' switches of the mic,
+Line In, A/V In and the DAC, and the output mixers' switches into the ADC, all off
+(`audio_mixer_build_held_commands()`). ripples' playback mutes only LINEIN (`dvr_mute_live_audio()`)
+and libmedia_mpp's reset touches none of the others but the left DAC switch, which it sets again for
+the file: without the held batch a mic or Line In level set on the page was heard with the file (the
+review of phase 3). Then, while held, the mixer writes no batch and does not watch the codec.
+Released, it applies its state and waits for the codec; that batch also sets the AIF1 DAC timeslot
+volumes back to 0 dB, which ripples' DVR Playback volume sets for a file or a test (HDMI-in audio
+plays through timeslot 0). The four test buttons do the same around ripples' test code. Each holder
+(the player, the tests) has its own bit: a test that ends while a file plays does not end the
+player's hold. They use ripples' raw routing of one source (`dvr_test_select_audio_source()`) and ripples'
 line out (`dvr_test_line_out()`), kept in `dvr.c` for them. all's mixer drove playback itself, with
 both DAC channels. ripples found the output mixer's DAC path tied to static on the Goggle 1, so its
 playback path is kept.
@@ -257,8 +271,19 @@ rows keep ripples' keys in `[record]`. The mixer takes ripples' values from `set
   `[mixer]` and `[hdmi]`.
 * **A `[mixer]` of all's unreleased version 1, or one cut short by a power loss** before its
   version was written: ripples' state, the section removed (one write).
-* **Leaving the page without a change** writes nothing. A change writes only the changed keys:
-  `[mixer]` ones with `version=2` last, ripples' in `[record]`.
+* **ripples-all, then stock ripples, then ripples-all again**: every `[mixer]` this firmware
+  writes also holds the `[record]` values its values belong to, `record_source` (Audio Source) and
+  `record_live` (Live Volume). When stock ripples changed `[record] audio_source` since, the
+  Record switches and Built-in RX Audio follow the new Audio Source as its row would set them;
+  when it changed `live_audio_volume`, A/V In follows the new Live Volume by ripples' curve. In
+  memory, nothing written at the start; the next change on the page writes them. What ripples did
+  not change stays as the page left it (the page's own Record switches, a trimmed A/V In). A
+  `[mixer]` without these keys (all's firmware) is read as before.
+* **Leaving the page without a change** writes nothing. A change writes the changed keys
+  (`[mixer]` ones with `version=2` last, ripples' in `[record]`), the `[record]` values the
+  `[mixer]` values belong to, and a `[mixer]` value that a changed `[record]` value would otherwise
+  change at the next start (Audio Source Line In, then Record Mic Yes again: written, or the Line
+  In preset would turn it off).
 
 ## Targets
 
@@ -291,6 +316,8 @@ into HDZero. What differs:
 * The LINEOUT muxes stay at OMIX_LR_SUM while the line out is off. ripples' `out_off` set them to
   their first item, which has no effect while the line out is off.
 * Sliders apply while they move; ripples applied them on release.
+* The AIF1 DAC timeslot volumes are 0 dB outside DVR playback and the tests; ripples left them at
+  the last DVR Playback volume (no difference to hear: ripples played nothing else through them).
 * Changes are click-free where the batch can make them so; the old scripts switched one control
   per amixer process.
 
@@ -308,9 +335,11 @@ line, or ripples' four-line note of the test buttons in ripples' font.
 the firmware's LVGL fonts (built for the host) against its column, on the goggles and the BoxPro,
 and checks that the font has every character. The CJK parts of the fonts hold only the characters
 of the translations they were made from (`utilities/font/generate_font_lib.py`), so new Chinese
-and Japanese strings must use those characters. ripples' own row labels and its test note are
-untranslated in ripples 1.2.2 and are shown in English, as on ripples. Every other string is
-translated (all's translations of all's strings, plus one new hint).
+and Japanese strings must use those characters (where a word has none, the Chinese note names the
+test fill's colours in English). Every string is translated: all's translations of all's strings,
+and since phase 4 ripples' own labels and its test note too (untranslated in ripples 1.2.2). The
+note is a key per line; line 3 is keyed with '-' for its '=' (a key of a language file cannot hold
+'='; `note_line()`).
 
 ## Testing on a goggle
 
@@ -329,9 +358,12 @@ in each source, to compare with afterwards.
    Volume up and down: as before.
 5. HDMI in: headphones silent; a clip records the selected source.
 6. The four test buttons: as on ripples. Afterwards the headphones and the recording are as
-   before the test (`amixer contents` matches `/tmp/audio_mixer.cmd`).
-7. DVR playback: as on ripples (left channel, DVR Playback volume). After it the live sources
-   come back.
+   before the test (`amixer contents` matches `/tmp/audio_mixer.cmd`). With Mic and Record
+   Headphone Mix on: the Mic test's clip has the mic alone. With Stream Audio streaming: the Mic
+   test says "Nothing recorded: audio input busy" (or records: then note it).
+7. DVR playback: as on ripples (left channel, DVR Playback volume), also with Mic or Line In set
+   above Off on the page: neither is heard with the file. After it the live sources come back.
+   With HDMI In Audio: HDMI-in audio as loud after a DVR file as before it.
 8. Extras: set Mic to 0 dB: the mic is heard at once, and after a reboot into HDZero too. Record
    Headphone Mix = Yes: Record Mic shows "Mix"; a clip has the mic once, at its headphone level.
    Audio Source to Line In: Record Line In only, the hint unchanged; Record Mic Yes as well: the
@@ -362,6 +394,13 @@ the worker thread, a simulated codec that takes the batches) and checks the resu
   the values in effect and in `g_setting.record`. It checks that nothing is written by the
   mixer at start-up or by a save without a change, and that all's own keys are still there
   after a change.
+* hold: ripples' DVR playback (libmedia_mpp's reset and `adec2ao_start()`'s commands) with Mic and
+  Line In heard and Record Headphone Mix on: only the file is heard, nothing recorded through the
+  output mixers, the timeslot volumes back afterwards; the Mic test records the mic alone; a test
+  that ends while a file plays does not end the player's hold.
+* the round trip ripples-all -> stock ripples -> ripples-all: Audio Source and Live Volume changed
+  by ripples win, nothing written at the start, the next change writes them, what ripples did not
+  change stays.
 * migration equivalence against ripples' firmware: libmedia_mpp's reset, then ripples' `dvr.c`
   sequences with the real `mkapp/app/script/audio_sel.sh`, after a source switch, with HDMI in,
   at the recording start, booting straight into HDZero, and with the record daemon resetting the
@@ -374,10 +413,11 @@ the worker thread, a simulated codec that takes the batches) and checks the resu
   the line out is off.
 
 `--driver <BSP>/sound/soc/sunxi/sun8iw16-codec.c` also checks that every modelled route is one of
-the driver's. `utilities/audio_mixer/mutants.py` (about 45 min, 6 in parallel) applies 74 small
+the driver's. `utilities/audio_mixer/mutants.py` (about 50 min, 6 in parallel) applies 88 small
 mutations to a copy of the sources and fails unless the test catches every one: all's that still
-apply (their reviews' among them), ripples' controls, the presets, the settings both ways, and
-hold. `check_strings.py` checks the page's strings (above).
+apply (their reviews' among them), ripples' controls, the presets, the settings both ways, hold,
+and the fixes of the review of phase 3 (the held batch, the holders, the timeslot volumes, the
+round trip). `check_strings.py` checks the page's strings (above).
 
 `utilities/audio_mixer/stub/amixer` logs what it is given; put it first in `PATH` (with
 `AMIXER_LOG`) to see the batches the emulator sends. On a goggle, `/tmp/audio_mixer.cmd` holds the
