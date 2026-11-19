@@ -1,7 +1,8 @@
 /*
- * Measures the strings of the Module Bay page (src/ui/page_modulebay.c) with the firmware's own
- * LVGL fonts (check_strings.py builds it once with conf/ui.h). Input, one per line:
- * "<kind>\t<lang>\t<text>", kind one of mb_label, mb_text, mb_status, mb_option, mb_note.
+ * Measures the strings of the Module Bay page (src/ui/page_modulebay.c) and the WiFi page's Stream
+ * Audio row with the firmware's own LVGL fonts (check_strings.py builds it once per layout with
+ * conf/ui.h). Input, one per line: "<kind>\t<lang>\t<text>", kind one of mb_label, mb_text,
+ * mb_status, mb_option, mb_note (Module Bay page, goggles only), wifi_label, wifi_note (WiFi page).
  * Output, one per line:
  *   "OK|WIDE|GLYPH <kind> <lang> <width>/<room> px <text>"
  * WIDE: wider than its place on the page, GLYPH: a character the font does not have (shown as
@@ -37,6 +38,22 @@ static int room(const char *kind, const lv_font_t **font) {
     if (strcmp(kind, "mb_note") == 0) {
         *font = UI_PAGE_LABEL_FONT;
         return 880;
+    }
+    // WiFi page, System: a row label up to the first button's arrow (measured on all's emulator)
+    if (strcmp(kind, "wifi_label") == 0) {
+#ifdef HDZBOXPRO
+        return 132;
+#else
+        return 200;
+#endif
+    }
+    if (strcmp(kind, "wifi_note") == 0) {
+        *font = UI_PAGE_LABEL_FONT;
+#ifdef HDZBOXPRO
+        return 600;
+#else
+        return 880;
+#endif
     }
     return -1;
 }
