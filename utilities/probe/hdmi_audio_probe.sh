@@ -1,8 +1,10 @@
 #!/bin/sh
-# HDZero goggle (Goggle 1 / Goggle 2 / BoxPro) - HDMI audio + pin probe. Writes nothing
-# persistent and changes no hardware setting; it only collects what the official OS image
-# cannot tell (live sound cards, pin mux, I2S registers, IT66121 / IT66021 registers,
-# dmesg) into one text file on the SD card. What it does touch, all at run time only:
+# HDZero goggle (Goggle 1 / Goggle 2 / BoxPro) - HDMI audio + pin probe. Changes no hardware
+# setting; it only collects what the official OS image cannot tell (live sound cards, pin mux,
+# I2S registers, IT66121 / IT66021 registers, dmesg) into one text file on the SD card. Its one
+# other file: the verdict for HDMI Out Audio on this board (end of part 1, from what it read):
+# GO writes hdmi_audio_go.txt on the SD card (the firmware's boot step and Audio page require it,
+# src/record/hdmi_boot.c hdmi_boot_probe()), NO-GO removes it. What it does touch, at run time only:
 #   - SIGSTOP/SIGCONT of the goggle app for short windows (< 1 s each) around register
 #     access, always resumed (trap, and a guardian process if the script is killed);
 #   - the bank-select register 0x0F of the two ITE chips, inside those windows: read with
@@ -27,7 +29,7 @@
 # PROBE_ROOT, PROBE_MODE, PROBE_OUTDIR, PROBE_WAIT, PROBE_TL, PROBE_GUARD: PC tests only.
 
 # shellcheck disable=SC2317,SC2034 # trap/guardian functions; common-block variables
-VERSION=3
+VERSION=4
 R="${PROBE_ROOT:-}"
 # ===== probe common block v2: identical in every probe script (test/run_tests.sh checks) =====
 # Modes. SD-card mode (MODE=sd): the file runs as /mnt/extsd/develop.sh, which rc.sh runs
@@ -530,6 +532,7 @@ devmem_check() {
         0x35513331) log "PH_CFG0 state: PH1-PH3 = I2S0 (HDMI Out Audio switched them this boot)" ;;
         0x*) log "PH_CFG0 state: NEITHER the stock value nor the I2S0 value: HDMI Out Audio would refuse (report this)" ;;
     esac
+    dm_cmp=none
     if [ ! -x "$BB_SERVICES" ] || ! "$BB_SERVICES" --list 2> /dev/null | grep -q -x devmem; then
         log "/dev/mem not read: no devmem ($BB_SERVICES missing or without the applet)"
         return
@@ -543,7 +546,13 @@ devmem_check() {
     rm -f "$DEVMEM_OUT"
     log "PH_CFG0 through /dev/mem ($BB_SERVICES devmem 0x0300B0FC 32, exit $dm_rc): $dm_v"
     if is_hex "$dm_v" && is_hex "$dm_lat"; then
-        if [ $((dm_v)) -eq $((dm_lat)) ]; then log "/dev/mem and sunxi_dump agree"; else log "/dev/mem and sunxi_dump DIFFER"; fi
+        if [ $((dm_v)) -eq $((dm_lat)) ]; then
+            dm_cmp=agree
+            log "/dev/mem and sunxi_dump agree"
+        else
+            dm_cmp=differ
+            log "/dev/mem and sunxi_dump DIFFER"
+        fi
     else
         log "/dev/mem read not usable (see above)"
     fi
@@ -553,6 +562,97 @@ pin_summary() {
     for d in "$DBG"/pinctrl/*/; do
         [ -r "${d}pinmux-pins" ] && grep -E '\((P(G([0-9]|1[0-3])|H[0-8]|E(1[6-9]|2[01])))\)' "${d}pinmux-pins" >> "$OUT" 2>&1
     done
+}
+
+# This board's id, as src/record/hdmi_boot.c hdmi_boot_board_id() reads it: the first of sys_info's
+# sunxi_chipid and sunxi_serial and cpuinfo's Serial that is 1..64 letters and digits and not all zeros
+board_id() {
+    for bs in "$R/sys/class/sunxi_info/sys_info sunxi_chipid" "$R/sys/class/sunxi_info/sys_info sunxi_serial" "$R/proc/cpuinfo Serial"; do
+        # shellcheck disable=SC2016 # awk's own variables
+        bv=$(awk -v k="${bs##* }" '{ i = index($0, ":"); if (!i) next; key = substr($0, 1, i - 1); gsub(/[ \t]/, "", key)
+            if (key != k) next; v = substr($0, i + 1); sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v); print v; exit }' "${bs% *}" 2> /dev/null)
+        case "$bv" in "" | *[!0-9A-Za-z]*) continue ;; esac
+        [ ${#bv} -le 64 ] || continue
+        case "$bv" in *[!0]*)
+            echo "$bv"
+            return
+            ;;
+        esac
+    done
+    echo unknown
+}
+
+# owner of pin $1 (PH1..PH3) in the kernel's pinmux-pins: "free", "ok" (a driver that may hold it:
+# uart4 for PH1, daudio0), or what holds it; "missing" if no pinmux-pins lists it
+pin_owner() {
+    po=missing
+    for d in "$DBG"/pinctrl/*/; do
+        [ -r "${d}pinmux-pins" ] || continue
+        pl=$(grep -m1 "($1):" "${d}pinmux-pins" 2> /dev/null) || continue
+        case "$pl" in
+            *"GPIO UNCLAIMED"*) ;;
+            *) po="a GPIO user ($pl)"; return ;;
+        esac
+        case "$pl" in
+            *"): (MUX UNCLAIMED)"*) po=free ;;
+            *"): 5090000.daudio "*) po=ok ;;
+            *"): 5001000.uart "*) if [ "$1" = PH1 ]; then po=ok; else po="($pl)"; fi ;;
+            *) po="($pl)" ;;
+        esac
+        return
+    done
+}
+
+# The verdict for HDMI Out Audio from what part 1 read (read only); GO: the marker for this board on the
+# SD card, NO-GO: no marker (an old one removed). docs/hdmi-audio.md, sections 7 and 8.
+GO_FILE=hdmi_audio_go.txt
+go_verdict() {
+    why=""
+    grep -q 'snddaudio0' "$R/proc/asound/cards" 2> /dev/null || why="$why; no snddaudio0 sound card (I2S0 did not probe)"
+    case "$dm_lat" in
+        0x35517751 | 0x35513331) ;;
+        *) why="$why; PH_CFG0 through sunxi_dump is $dm_lat, not 0x35517751 (rc.sh) or 0x35513331" ;;
+    esac
+    # shellcheck disable=SC2086 # the bytes one by one
+    set -- $dm_raw
+    if [ $# != 11 ] || [ "$1" != 30 ] || [ "$2" != 78 ] || [ "${11}" != 0a ]; then
+        why="$why; the sunxi_dump answer is not 0x + 8 hex digits + newline ($dm_raw)"
+    else
+        shift 2
+        for byte in "$@"; do
+            case "$byte" in 3[0-9] | 6[1-6] | 0a) ;; *) why="$why; the sunxi_dump answer has a byte $byte" ;; esac
+        done
+    fi
+    [ "$dm_cmp" = differ ] && why="$why; /dev/mem and sunxi_dump differ"
+    for p in PH1 PH2 PH3; do
+        pin_owner $p
+        case "$po" in
+            free | ok) ;;
+            missing) why="$why; $p's owner unknown (no pinmux-pins lists it)" ;;
+            *) why="$why; $p held by $po" ;;
+        esac
+    done
+    sd="${PROBE_OUTDIR:-$R/mnt/extsd}"
+    if [ -z "$why" ]; then
+        bid=$(board_id)
+        log "HDMI Out Audio verdict: GO for board $bid (the SoC side as the boot step expects it; the board wiring of PH1-PH3 is not known to any probe: docs/hdmi-audio.md)"
+        if { echo "hdmi_audio_probe=GO"
+            echo "board=$bid"
+            echo "probe_version=$VERSION"
+            echo "ph_cfg0=$dm_lat"
+            echo "note=written by hdmi_audio_probe.sh: HDMI Out Audio may be switched on for this board"; } > "$sd/$GO_FILE.tmp" 2> /dev/null &&
+            mv -f "$sd/$GO_FILE.tmp" "$sd/$GO_FILE" 2> /dev/null; then
+            log "  written: $sd/$GO_FILE"
+        else
+            rm -f "$sd/$GO_FILE.tmp" 2> /dev/null
+            log "  NOT written: $sd not writable (HDMI Out Audio stays off)"
+        fi
+    else
+        log "HDMI Out Audio verdict: NO-GO:${why#;}"
+        if [ -e "$sd/$GO_FILE" ]; then
+            rm -f "$sd/$GO_FILE" 2> /dev/null && log "  removed the GO of an earlier run: $sd/$GO_FILE"
+        fi
+    fi
 }
 
 ######################################################################
@@ -658,6 +758,11 @@ part1() {
     sec "PH_CFG0 through sunxi_dump and through /dev/mem (read only); HDMI audio boot record"
     devmem_check
     catf "$TMPD/hdmi_audio.boot"
+    catf "$R/sys/class/sunxi_info/sys_info"
+    grepf '^Serial|^Hardware|^Revision' "$R/proc/cpuinfo"
+
+    sec "HDMI Out Audio verdict for this board (docs/hdmi-audio.md, section 7)"
+    go_verdict
 
     sec "I2C"
     run i2cdetect -l

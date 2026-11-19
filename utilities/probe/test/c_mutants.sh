@@ -100,6 +100,17 @@ mut "system: always waits 1 s" util/system.c hdmi_boot_test.sh \
     's/soc_reg_lock_n\(recent \? 1 : SOC_REG_LOCK_TRIES\)/soc_reg_lock_n(SOC_REG_LOCK_TRIES)/'
 mut "system: command not run when lock busy" util/system.c hdmi_boot_test.sh \
     's/    const int r = system\(command\);/    const int r = fd < 0 ? -1 : system(command);/'
+# the read-only probe's GO for this board (review of phase 3, finding 3)
+mut "gate: the probe's marker not required" record/hdmi_boot.c hdmi_boot_test.sh \
+    's/if \(hdmi_boot_probe\(why, sizeof\(why\)\) != HB_PROBE_GO\) \{/if (0) {/'
+mut "gate: another board's GO accepted" record/hdmi_boot.c hdmi_boot_test.sh \
+    's/    if \(strcmp\(mark, board\) != 0\) \{/    if (0) {/'
+mut "gate: a NO-GO accepted" record/hdmi_boot.c hdmi_boot_test.sh \
+    's/    if \(strcmp\(go, "GO"\) != 0\) \{/    if (0) {/'
+mut "gate: board id from cpuinfo before sys_info" record/hdmi_boot.c hdmi_boot_test.sh \
+    's/    if \(!hb_id_from\(HDMIA_BOARD_INFO_FILE, "sunxi_chipid", id, len\) &&/    if (!hb_id_from(HDMIA_CPUINFO_FILE, "Serial", id, len) \&\& !hb_id_from(HDMIA_BOARD_INFO_FILE, "sunxi_chipid", id, len) \&\&/'
+mut "gate: an all-zero id taken" record/hdmi_boot.c hdmi_boot_test.sh \
+    's/                if \(ok && !zero\) \{/                if (ok) {/'
 mut "supported: BoxPro left out again" record/hdmi_boot.c hdmi_boot_test.sh \
     's/defined\(HDZGOGGLE2\) \|\| defined\(HDZBOXPRO\)/defined(HDZGOGGLE2)/'
 mut "supported: any target" record/hdmi_boot.c hdmi_boot_test.sh \

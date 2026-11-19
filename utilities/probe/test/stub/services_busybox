@@ -11,6 +11,11 @@ if [ "$*" = --list ]; then
 fi
 if [ "$1" = devmem ] && [ "$#" -eq 3 ] && [ "$3" = 32 ]; then
     soc_apply_write
+    # (a test makes /dev/mem disagree with the latch: $MODEL/devmem_value)
+    if [ -f "$M/devmem_value" ]; then
+        printf '0x%08X\n' "$(cat "$M/devmem_value")"
+        exit 0
+    fi
     printf '0x%08X\n' "$(kv_get "$M/soc" "$(n32 "$2")" 0)"
     exit 0
 fi

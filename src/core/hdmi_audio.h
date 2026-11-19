@@ -37,6 +37,9 @@ void hdmi_audio_load(void);
 // HDMI audio exists on this target: true on Goggle 1, Goggle 2 and BoxPro (the same device tree,
 // sys_config and rc.sh), false on any other (src/record/hdmi_boot.c hdmi_boot_supported())
 bool hdmi_audio_supported(void);
+// HDMI Out Audio may be switched on: the read-only probe's GO for this board is on the SD card
+// (src/record/hdmi_boot.h hdmi_boot_probe(); docs/hdmi-audio.md, section 7). Reads it each time.
+bool hdmi_audio_out_allowed(void);
 
 // Stored switch position: what setting.ini [hdmi] audio_out says now (exactly "1"), as last
 // written by hdmi_audio_set(). Not necessarily in effect: see hdmi_audio_out_active().

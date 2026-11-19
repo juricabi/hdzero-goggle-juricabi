@@ -37,6 +37,13 @@ bay-no-function-restore@bay_gpio_pattern.sh@s/^        if lat_write \$PG_CFG0 "\
 bay-all-three-outputs@bay_gpio_pattern.sh@s/^    echo in > "\$G\/gpio\$p\/direction" 2> \/dev\/null || refuse/    echo low > "$G\/gpio$p\/direction" 2> \/dev\/null || refuse/@bay
 bay-pin-left-output@bay_gpio_pattern.sh@s/^        echo in > "\$G\/gpio\$p\/direction" 2> \/dev\/null$/        :/@bay
 start-app-in-ssh-mode@all@s/^    \[ "\$MODE" = sd \] || return 0$/    :/@bay
+verdict-ignores-cards@hdmi_audio_probe.sh@s/^    grep -q .snddaudio0. .*$/    :/@probe
+verdict-ignores-pin-owners@hdmi_audio_probe.sh@s/^            \*) why="\$why; \$p held by \$po" ;;$/            *) ;;/@probe
+verdict-gpio-users-ok@hdmi_audio_probe.sh@s/^            \*) po="a GPIO user (\$pl)"; return ;;$/            *) ;;/@probe
+verdict-uart-on-any-pin@hdmi_audio_probe.sh@s/^            \*"): 5001000.uart "\*) if \[ "\$1" = PH1 \]; then po=ok; else po="(\$pl)"; fi ;;$/            *".uart "*) po=ok ;;/@probe
+verdict-old-marker-kept@hdmi_audio_probe.sh@s/^            rm -f "\$sd\/\$GO_FILE" 2> \/dev\/null \&\& log/            : \&\& log/@probe
+verdict-board-unknown-always@hdmi_audio_probe.sh@s/^        bid=\$(board_id)$/        bid=unknown/@probe
+verdict-devmem-ignored@hdmi_audio_probe.sh@s/^    \[ "\$dm_cmp" = differ \] \&\& why=.*$/    :/@probe
 '
 
 # (printf, not echo: dash's echo turns a backslash and a digit into a control character)
