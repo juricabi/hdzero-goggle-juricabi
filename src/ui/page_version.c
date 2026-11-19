@@ -42,8 +42,11 @@ enum {
     ROW_GOGGLE_COUNT
 };
 
-#define APP_VERSION_DISPLAY_PREFIX "ripples-"
-#define APP_VERSION_IDENTITY_SUFFIX "-ripples"
+// The firmware's identity in its version (VERSION, written to /mnt/app/version by mkapp/mkapp_ota.sh):
+// "<ripples' version>-juricabi.<n>", with "-<commit>" appended when not built at a tag
+#define APP_VERSION_IDENTITY "-juricabi."
+#define APP_VERSION_NAME     "juricabi."
+#define APP_VERSION_BASE     "ripples"
 
 enum {
     ROW_BOXPRO_UPDATE_VTX = -1,
@@ -364,6 +367,23 @@ static void flash_goggle() {
     lv_obj_add_flag(bar_goggle, LV_OBJ_FLAG_HIDDEN);
 }
 
+// "1.2.2-juricabi.1" as "juricabi.1 ripples 1.2.2" (a development build: "...-<commit>", cut to what fits
+// `size`; the Firmware page's buffer holds 31 characters); another version as it is
+static void format_app_version(const char *version, char *out, size_t size) {
+    const char *numeric = version;
+    while (*numeric && !isdigit((unsigned char)*numeric))
+        numeric++;
+    const char *id = strstr(numeric, APP_VERSION_IDENTITY);
+    if (id == NULL) {
+        snprintf(out, size, "%s", version);
+        return;
+    }
+    const char *n = id + strlen(APP_VERSION_IDENTITY);
+    const int n_len = (int)strcspn(n, "-");
+    snprintf(out, size, "%s%.*s %s %.*s%s", APP_VERSION_NAME, n_len, n, APP_VERSION_BASE, (int)(id - numeric), numeric,
+             n + n_len);
+}
+
 int generate_current_version(sys_version_t *sys_ver) {
     sys_ver->va = I2C_Read(ADDR_FPGA, 0xff);
     sys_ver->rx0 = rx_status[0].rx_ver;
@@ -395,20 +415,10 @@ int generate_current_version(sys_version_t *sys_ver) {
                                 &sys_ver->app_major,
                                 &sys_ver->app_minor,
                                 &sys_ver->app_patch);
+    // (app_major / minor / patch: ripples' version, 1.2.2, which elrs.c sends to the backpack)
     char display_app_version[32] = {0};
     if (version_fields == 3) {
-        const char *identity_suffix = strstr(numeric_version, APP_VERSION_IDENTITY_SUFFIX);
-        if (identity_suffix) {
-            snprintf(display_app_version, sizeof(display_app_version), "%s%.*s%s",
-                     APP_VERSION_DISPLAY_PREFIX,
-                     (int)(identity_suffix - numeric_version),
-                     numeric_version,
-                     identity_suffix + strlen(APP_VERSION_IDENTITY_SUFFIX));
-        } else {
-            snprintf(display_app_version, sizeof(display_app_version), "%s%s",
-                     APP_VERSION_DISPLAY_PREFIX,
-                     numeric_version);
-        }
+        format_app_version(app_version, display_app_version, sizeof(display_app_version));
     } else {
         snprintf(display_app_version, sizeof(display_app_version), "%s", app_version);
     }
