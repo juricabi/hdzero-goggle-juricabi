@@ -19,7 +19,7 @@ static dvr_auto_action_t enforce(dvr_auto_t *s, const dvr_auto_env_t *env) {
     return DVR_AUTO_START;
 }
 
-dvr_auto_action_t dvr_auto_backpack(dvr_auto_t *s, bool on, unsigned delay_s, const dvr_auto_env_t *env) {
+void dvr_auto_backpack(dvr_auto_t *s, bool on, unsigned delay_s, const dvr_auto_env_t *env) {
     // the backpack's new word replaces the button's and any delayed one
     s->held = false;
     s->user_stopped = false;
@@ -28,23 +28,19 @@ dvr_auto_action_t dvr_auto_backpack(dvr_auto_t *s, bool on, unsigned delay_s, co
         if (delay_s == 0) {
             s->arm = DVR_AUTO_ARM_ON;
             s->next_try_ms = 0;
-            return enforce(s, env);
+        } else {
+            s->due = true;
+            s->due_on = true;
+            s->due_ms = env->now_ms + (uint64_t)delay_s * 1000u;
         }
-        s->due = true;
-        s->due_on = true;
-        s->due_ms = env->now_ms + (uint64_t)delay_s * 1000u;
-        return DVR_AUTO_NOTHING;
+        return;
     }
-    // disarmed: nothing starts from now on; a running recording stops, after the stop delay
+    // disarmed: nothing starts from now on; a recording stops after the stop delay (at the next pass
+    // without one). Always scheduled: a start may be under way that the goggle does not count yet.
     s->arm = DVR_AUTO_ARM_OFF;
-    if (!env->recording)
-        return DVR_AUTO_NOTHING;
-    if (delay_s == 0)
-        return DVR_AUTO_STOP;
     s->due = true;
     s->due_on = false;
     s->due_ms = env->now_ms + (uint64_t)delay_s * 1000u;
-    return DVR_AUTO_NOTHING;
 }
 
 dvr_auto_action_t dvr_auto_step(dvr_auto_t *s, const dvr_auto_env_t *env, bool picture) {
@@ -55,12 +51,15 @@ dvr_auto_action_t dvr_auto_step(dvr_auto_t *s, const dvr_auto_env_t *env, bool p
     }
 
     if (s->due && env->now_ms >= s->due_ms) {
-        s->due = false;
         if (s->due_on) {
+            s->due = false;
             s->arm = DVR_AUTO_ARM_ON;
             s->next_try_ms = 0;
         } else if (env->recording) {
+            s->due = false;
             return DVR_AUTO_STOP;
+        } else if (env->now_ms >= s->due_ms + DVR_AUTO_STOP_WATCH_MS) {
+            s->due = false; // nothing was recording, nor came to: the stop is done with
         }
     }
     return enforce(s, env);

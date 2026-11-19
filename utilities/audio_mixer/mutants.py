@@ -83,7 +83,7 @@ MUTANTS = [
                                           "    if (0)\n        pthread_cond_signal(&work_cond);")]),
     ("no watcher", M, [("const int has = codec_has_last_batch(full);", "const int has = codec_has_last_batch(full) >= 0;")]),
     ("watcher: no backoff after the retries", M, [("#define AUDIO_MIXER_WATCH_RETRIES 3", "#define AUDIO_MIXER_WATCH_RETRIES 1000")]),
-    ("review x3: ADC volume never written", R, [('    cset(&cb, "ADC volume", adc_volume);\n', "")]),
+    ("review x3: ADC volume never written", R, [('    cset(&cb, "ADC volume", adc_volume);\n', "    (void)adc_volume;\n")]),
     ("review x4: HDMI level is not a headphone level", M, [
         ("field == AUDIO_MIXER_AV || field == AUDIO_MIXER_HDMI;", "field == AUDIO_MIXER_AV;")]),
     ("review x5: unused output-mixer gains not reset to 0 dB", R, [

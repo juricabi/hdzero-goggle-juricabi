@@ -81,20 +81,48 @@ void dvr_clear_race_label(void) {
 //-1=error;
 // 0=idle,1=recording,2=stopped,3=No SD card,4=recorf file path error,
 // 5=SD card Full,6=Encoder error,7=Open Record File Failed
+static int read_record_status(void) {
+    int ret = -1;
+    FILE *fp = fopen("/tmp/record.dat", "r");
+    if (fp) {
+        if (fscanf(fp, "%d", &ret) != 1)
+            ret = -1;
+        fclose(fp);
+    }
+    return ret;
+}
+
+static uint64_t monotonic_ms(void);
+
+// juricabi: ripples waited a fixed 2 s after every start and stop command to the recorder ("wait for
+// record process"). Now only until the recorder's status file says it has started (1, or an error: 3
+// and above) or stopped (anything but 1: written once the file is closed), at most those 2 s. The owner's
+// dvr_dbg.log shows the recorder needing well under a second.
+#define RECORD_STATUS_WAIT_MS 2000
+static void wait_record_status(bool started) {
+    const uint64_t began = monotonic_ms();
+    int st;
+    for (;;) {
+        st = read_record_status();
+        if (started ? (st == 1 || st >= 3) : (st != 1))
+            break;
+        if (monotonic_ms() - began >= RECORD_STATUS_WAIT_MS)
+            break;
+        usleep(50 * 1000);
+    }
+    dvr_dbg_log("%s: the recorder's status %d after %llu ms", started ? "start" : "stop", st,
+                (unsigned long long)(monotonic_ms() - began));
+}
+
 void dvr_update_status() {
     pthread_mutex_lock(&dvr_mutex);
     if (dvr_is_recording) {
-        int ret = -1;
-        FILE *fp = fopen("/tmp/record.dat", "r");
-        if (fp) {
-            fscanf(fp, "%d", &ret);
-            fclose(fp);
-        }
+        const int ret = read_record_status();
         if (ret != 1) {
             dvr_is_recording = false;
             system_script(REC_STOP);
             record_pending = false;
-            sleep(2);                         // wait for record process
+            wait_record_status(false); // (ripples: sleep(2))
         }
     }
     pthread_mutex_unlock(&dvr_mutex);
@@ -669,7 +697,7 @@ bool dvr_cmd(osd_dvr_cmd_t cmd) {
                 usleep(100 * 1000);
                 system_script(REC_START);
                 dvr_recording_start = time(NULL);
-                sleep(2); // wait for record process
+                wait_record_status(true); // (ripples: sleep(2))
             } else {
                 record_pending = true;
             }
@@ -679,7 +707,7 @@ bool dvr_cmd(osd_dvr_cmd_t cmd) {
             dvr_is_recording = false;
             dvr_dbg_log("stop_request cmd=%d", cmd);
             system_script(REC_STOP);
-            sleep(2); // wait for record process
+            wait_record_status(false); // (ripples: sleep(2))
         }
     }
 
@@ -709,15 +737,15 @@ static void auto_env(dvr_auto_env_t *env) {
     env->auto_mode = !g_setting.record.mode_manual;
 }
 
+// (in the peripheral thread only: dvr_cmd() waits about 2 s after a start or a stop)
 static void auto_act(dvr_auto_action_t action, const char *why) {
     if (action == DVR_AUTO_STOP) {
         LOGI("DVR auto: stop (%s)", why);
         dvr_cmd(DVR_STOP);
     } else if (action == DVR_AUTO_START) {
         const uint64_t now = monotonic_ms();
-        if (dvr_cmd(DVR_START)) {
-            LOGI("DVR auto: start (%s)", why);
-        } else {
+        LOGI("DVR auto: start (%s)", why);
+        if (!dvr_cmd(DVR_START)) {
             static uint64_t logged_ms;
             if (now - logged_ms >= 5000) { // (tried again every second)
                 LOGI("DVR auto: start (%s) refused: no room on the card, trying again", why);
@@ -739,28 +767,28 @@ static void auto_button_press(void) {
     LOGI("DVR auto: button %s", stopping ? "stop" : "start");
 }
 
+// The ELRS thread: the command is only taken in (dvr_auto_tick() acts on the latest one).
 void dvr_auto_backpack_cmd(bool on, unsigned delay_s) {
     dvr_auto_env_t env;
     auto_env(&env);
     pthread_mutex_lock(&auto_lock);
-    const dvr_auto_action_t action = dvr_auto_backpack(&auto_state, on, delay_s, &env);
+    dvr_auto_backpack(&auto_state, on, delay_s, &env);
     pthread_mutex_unlock(&auto_lock);
     LOGI("DVR auto: backpack %s, delay %u s (video view %d, recording %d, card %d, Record Mode %s)", on ? "start" : "stop",
          delay_s, env.in_video, env.recording, env.storage_ok, env.auto_mode ? "Auto" : "Manual");
-    auto_act(action, "backpack");
 }
 
 void dvr_auto_tick(bool picture) {
     dvr_auto_env_t env;
     auto_env(&env);
     pthread_mutex_lock(&auto_lock);
-    const dvr_auto_arm_t before = auto_state.arm;
+    const bool start_was_due = auto_state.due && auto_state.due_on;
     const dvr_auto_action_t action = dvr_auto_step(&auto_state, &env, picture);
-    const dvr_auto_arm_t after = auto_state.arm;
+    const bool start_delay_passed = start_was_due && !auto_state.due;
     pthread_mutex_unlock(&auto_lock);
-    if (before != after)
-        LOGI("DVR auto: backpack %s (its start delay passed)", dvr_auto_arm_name(after));
-    auto_act(action, after == DVR_AUTO_ARM_ON ? "armed" : "the backpack's stop delay passed");
+    if (start_delay_passed)
+        LOGI("DVR auto: backpack armed (its start delay passed)");
+    auto_act(action, action == DVR_AUTO_STOP ? "the backpack is disarmed" : "armed");
 }
 
 bool dvr_auto_picture_start_allowed(void) {

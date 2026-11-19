@@ -37,6 +37,9 @@ extern "C" {
 // Record Mode Auto, after a stop by the button: passes (about 100 ms each) without a picture after which
 // the picture may start a recording again
 #define DVR_AUTO_LOSS_PASSES 20
+// a disarm's stop waits this long past its delay for a start that was under way (ripples' dvr_cmd() takes
+// about 2.2 s for a start) before it is done with
+#define DVR_AUTO_STOP_WATCH_MS 3000
 
 typedef enum {
     DVR_AUTO_ARM_NONE = 0, // no backpack command since the start
@@ -73,9 +76,12 @@ typedef struct {
 void dvr_auto_reset(dvr_auto_t *s);
 
 // The backpack's recording state (MSP_SET_REC_STATE): on = start (armed), delay_s before it applies.
-dvr_auto_action_t dvr_auto_backpack(dvr_auto_t *s, bool on, unsigned delay_s, const dvr_auto_env_t *env);
+// Only takes it in; dvr_auto_step() acts, in the peripheral thread: ripples' dvr_cmd() waits 2 s after a
+// start or a stop, and fast arm / disarm toggles queued up behind it in the backpack's reader thread (the
+// owner's goggle). The latest word wins.
+void dvr_auto_backpack(dvr_auto_t *s, bool on, unsigned delay_s, const dvr_auto_env_t *env);
 
-// Every pass of the peripheral thread (about 100 ms), with the source's picture.
+// Every pass of the peripheral thread (about 100 ms), with the source's picture: what to do now.
 dvr_auto_action_t dvr_auto_step(dvr_auto_t *s, const dvr_auto_env_t *env, bool picture);
 
 // A start that dvr_auto_step() asked for was refused at once (the goggle busy): try again soon.
