@@ -25,6 +25,11 @@ void conf_saveRecordParams(char* confFile, RecordParams_t* recPara);
 
 void rec_dbg_log(const char* fmt, ...);
 
+/* live stream audio (RTSP AAC track): [live] audio, default off */
+bool conf_loadLiveAudio(char* confFile);
+/* [live] audio_offset_ms: added to the stream's audio timestamps (positive: audio later), -500..500, default 0 */
+int  conf_loadLiveAudioOffset(char* confFile);
+
 #ifdef __cplusplus
 }
 #endif /* End of #ifdef __cplusplus */

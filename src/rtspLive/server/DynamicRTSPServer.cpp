@@ -25,6 +25,7 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #include "H264FramedLiveSource.hh"
 #include "H264LiveVideoServerMediaSubssion.hh"
 #include "H265LiveVideoServerMediaSubssion.hh"
+#include "AACLiveAudioServerMediaSubsession.hh"
 
 DynamicRTSPServer*
 DynamicRTSPServer::createNew(UsageEnvironment& env, Port ourPort,
@@ -47,7 +48,8 @@ DynamicRTSPServer::DynamicRTSPServer(UsageEnvironment& env, int ourSocketIPv4, i
 				     char* streamName)
   : RTSPServer(env, ourSocketIPv4, ourSocketIPv6, ourPort, authDatabase, reclamationTestSeconds)
   , _h265(h265)
-  , _streamName(streamName) {
+  , _streamName(streamName)
+  , _audio(False) {
 
   printf("[MEDIA SERVER]Dynamic RTSP server constructed\n");
 }
@@ -137,10 +139,14 @@ static ServerMediaSession* createNewSMS(UsageEnvironment& env,
     NEW_SMS("Live Stream");
 
     if( server->_h265 ) {
-        sms->addSubsession(H265LiveVideoServerMediaSubssion::createNew(env, reuseSource));
+        sms->addSubsession(H265LiveVideoServerMediaSubssion::createNew(env, reuseSource, server->_audio));
     }
     else {
-        sms->addSubsession(H264LiveVideoServerMediaSubssion::createNew(env, reuseSource));
+        sms->addSubsession(H264LiveVideoServerMediaSubssion::createNew(env, reuseSource, server->_audio));
+    }
+    // live stream audio (RTSP AAC track)
+    if( server->_audio ) {
+        sms->addSubsession(AACLiveAudioServerMediaSubsession::createNew(env, reuseSource));
     }
   }
 

@@ -17,6 +17,7 @@
 #include "H264LiveVideoServerMediaSubssion.hh"
 #include "H265LiveVideoServerMediaSubssion.hh"
 #endif
+#include "AACLiveAudioServerMediaSubsession.hh"
 
 extern "C"
 {
@@ -58,7 +59,17 @@ void signal_segv(int sig)
 {
 	aloge( "signal sigsegv\n" );
 
+	avshare_dropConnections();
 	abort();
+}
+
+// SIGTERM (killall), SIGINT, SIGHUP: tell the record process the readers are gone, then die
+// of the signal as before.
+static void signal_quit(int sig)
+{
+	avshare_dropConnections();
+	signal(sig, SIG_DFL);
+	raise(sig);
 }
 
 void dump_bytes(uint8_t* data, int len)
@@ -145,7 +156,9 @@ bool disk_checkFile(const char* sPath)
         return false;
 	}
 
-	stat(sPath, &st);
+	if(stat(sPath, &st) != 0) {
+        return false; // st is not filled in: do not test garbage
+	}
 	return S_ISREG(st.st_mode);
 }
 
@@ -164,7 +177,8 @@ void live_checkConf(LiveContext_t* liveCtx, char* confSet)
 
     char  sTemp[MAX_pathLEN];
     char* p = sTemp;
-    readlink("/proc/self/exe", sTemp, MAX_pathLEN);
+    memset(sTemp, 0, MAX_pathLEN); // readlink() does not terminate the string
+    readlink("/proc/self/exe", sTemp, MAX_pathLEN - 1);
     if (NULL != (p = strrchr(sTemp,'/'))){
         /* path where confs is */
         *p = '\0';
@@ -176,7 +190,7 @@ void live_checkConf(LiveContext_t* liveCtx, char* confSet)
 
         /* path where record is */
         memset(sTemp, 0, MAX_pathLEN);
-        readlink("/proc/self/exe", sTemp, MAX_pathLEN);
+        readlink("/proc/self/exe", sTemp, MAX_pathLEN - 1);
         p = strrchr(sTemp,'/');
         *p = '\0';
         snprintf(liveCtx->confFile, MAX_pathLEN, "%s/%s", sTemp, REC_confFILE);
@@ -270,6 +284,10 @@ void* live_multicast_loop(void *context)
   Groupsock rtcpGroupsock(*env, destinationAddress, rtcpPort, ttl);
   rtcpGroupsock.multicastSendOnly(); // we're a SSM source
 
+  if( liveCtx->audio ) {
+    *env << LOG_PRIFIX << "live audio is not supported in multicast mode, streaming video only\n";
+  }
+
   // Create a 'H264 Video RTP' sink from the RTP 'groupsock':
   RTPSink* videoSink;
   OutPacketBuffer::maxSize = 7208076;//100000;
@@ -343,7 +361,11 @@ void* live_loop(void *context)
     portNumBits rtspServerPortNum = liveCtx->port;//8554;
 
     if( liveCtx->runDynamicRTSPServer ) {
-        rtspServer = DynamicRTSPServer::createNew(*env, rtspServerPortNum, authDB, liveCtx->h265, liveCtx->streamName);
+        DynamicRTSPServer* dynamicServer = DynamicRTSPServer::createNew(*env, rtspServerPortNum, authDB, liveCtx->h265, liveCtx->streamName);
+        if( dynamicServer != NULL ) {
+            dynamicServer->_audio = liveCtx->audio; // live stream audio (RTSP AAC track)
+        }
+        rtspServer = dynamicServer;
     }
     else {
         rtspServer = RTSPServer::createNew(*env, rtspServerPortNum, authDB);
@@ -353,10 +375,14 @@ void* live_loop(void *context)
             ServerMediaSession* sms = ServerMediaSession::createNew(*env, streamName, streamName, descriptionString);
 
             if (liveCtx->h265) {
-                sms->addSubsession(H265LiveVideoServerMediaSubssion::createNew(*env, reuseFirstSource));
+                sms->addSubsession(H265LiveVideoServerMediaSubssion::createNew(*env, reuseFirstSource, liveCtx->audio));
             }
             else {
-                sms->addSubsession(H264LiveVideoServerMediaSubssion::createNew(*env, reuseFirstSource));
+                sms->addSubsession(H264LiveVideoServerMediaSubssion::createNew(*env, reuseFirstSource, liveCtx->audio));
+            }
+            // live stream audio (RTSP AAC track)
+            if (liveCtx->audio) {
+                sms->addSubsession(AACLiveAudioServerMediaSubsession::createNew(*env, reuseFirstSource));
             }
             rtspServer->addServerMediaSession(sms);
         }
@@ -427,6 +453,7 @@ void live_getParams(LiveContext_t* liveCtx, int argc, char* argv[])
     alogd("conf: %s\n", liveCtx->confFile);
 
     conf_loadLiveParams(liveCtx);
+    alogd("live audio: %s\n", liveCtx->audio ? "on" : "off");
 
     if( argc > 1 ) {
         if( strcmp(argv[1], "-nt") == 0 ) {
@@ -483,6 +510,7 @@ void main_loop(LiveContext_t* liveCtx)
 
 int main(int argc, char *argv[])
 {
+    setvbuf(stdout, NULL, _IOLBF, 0); // /tmp/rtspLive.log is read while rtspLive runs
     show_version(argc, argv);
 
     alogd("rtspLive start ...\n");
@@ -494,6 +522,11 @@ int main(int argc, char *argv[])
 		aloge( "already runing... exit!\n");
 		exit(1);
 	}
+	// from here on this is the stream reader: never leave the connect flags set behind
+	atexit(avshare_dropConnections);
+	signal(SIGTERM, signal_quit);
+	signal(SIGINT, signal_quit);
+	signal(SIGHUP, signal_quit);
 
     LiveContext_t liveCtx;
     ZeroMemory(&liveCtx, sizeof(liveCtx));

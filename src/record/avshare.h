@@ -42,9 +42,9 @@ typedef enum
 	FRAME_NUM,
 } FrameType_e;
 
-int  avshare_add(uint8_t * pstStream, int len, FrameType_e frameType, uint32_t millis, MediaType_e streamType);
+int  avshare_add(uint8_t * pstStream, int len, FrameType_e frameType, uint64_t timestamp, MediaType_e streamType);
 void avshare_addaud(uint8_t * buf, int len, uint32_t millis );
-void avshare_addvid(uint8_t * pstStream, int len, FrameType_e frameType, uint32_t millis);
+void avshare_addvid(uint8_t * pstStream, int len, FrameType_e frameType, uint64_t timestamp);
 void avshare_flush(void);
 
 int avshare_init(void);
@@ -58,6 +58,12 @@ int  avshare_connect(MediaType_e streamType);
 int  avshare_disconnect(MediaType_e streamType);
 bool avshare_connected(MediaType_e streamType);
 void avshare_reset(void);
+
+/* ---- live stream audio (RTSP AAC track) ----
+ * Queue one encoded audio frame (ADTS header kept) for rtspLive, all or nothing.
+ * timestampUs: CLOCK_MONOTONIC in microseconds.
+ * Returns 0 queued, 1 ring full (frame dropped), -2 not initialized, -3 no audio reader, -4 too big. */
+int avshare_addAudioFrame(const uint8_t* data, int len, uint64_t timestampUs);
 
 #ifdef __cplusplus
 }

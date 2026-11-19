@@ -15,6 +15,7 @@
 #define KEY_NAME        "name"
 #define KEY_PORT        "port"
 #define KEY_MULITCAST   "multicast"
+#define KEY_AUDIO       "audio"
 
 #define sizearray(a)  (sizeof(a) / sizeof((a)[0]))
 #define check_set(v, min, max)  ( ((v)<(min)) ? (min) : (((v)>(max)) ? (max) : (v)) )
@@ -41,4 +42,8 @@ void conf_loadLiveParams(LiveContext_t* liveCtx)
 
     lValue = ini_getbool(sSection, KEY_MULITCAST, LIVE_rtspMULTICAST, confFile);
     liveCtx->IsMulticast = (lValue > 0);
+
+    // live stream audio (RTSP AAC track)
+    lValue = ini_getbool(SEC_LIVE, KEY_AUDIO, LIVE_AUDIO, confFile);
+    liveCtx->audio = (lValue > 0);
 }

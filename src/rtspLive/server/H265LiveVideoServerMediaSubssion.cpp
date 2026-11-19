@@ -1,14 +1,16 @@
 #include "H265LiveVideoServerMediaSubssion.hh"
 #include "H264FramedLiveSource.hh"
 #include "H265VideoStreamFramer.hh"
+#include "LiveNalVideoSource.hh"
 
-H265LiveVideoServerMediaSubssion* H265LiveVideoServerMediaSubssion::createNew(UsageEnvironment& env, Boolean reuseFirstSource)
+H265LiveVideoServerMediaSubssion* H265LiveVideoServerMediaSubssion::createNew(UsageEnvironment& env, Boolean reuseFirstSource, Boolean nalTimestamps)
 {
-	return new H265LiveVideoServerMediaSubssion(env, reuseFirstSource);
+	return new H265LiveVideoServerMediaSubssion(env, reuseFirstSource, nalTimestamps);
 }
 
-H265LiveVideoServerMediaSubssion::H265LiveVideoServerMediaSubssion(UsageEnvironment& env, Boolean reuseFirstSource)
+H265LiveVideoServerMediaSubssion::H265LiveVideoServerMediaSubssion(UsageEnvironment& env, Boolean reuseFirstSource, Boolean nalTimestamps)
 : H265VideoFileServerMediaSubsession(env, NULL, reuseFirstSource)
+, fNalTimestamps(nalTimestamps)
 {
     printf("[MEDIA SERVER]H265 server media subssion construct\n");
 }
@@ -21,6 +23,17 @@ H265LiveVideoServerMediaSubssion::~H265LiveVideoServerMediaSubssion()
 FramedSource* H265LiveVideoServerMediaSubssion::createNewStreamSource(unsigned clientSessionId, unsigned& estBitrate)
 {
 	estBitrate = 4000; //kbps, estimate
+
+	if (fNalTimestamps)
+	{
+		// stream with audio: NAL units with the frames' own (shared) timestamps
+		LiveNalVideoSource* nalSource = LiveNalVideoSource::createNew(envir(), True);
+		if (nalSource == NULL)
+		{
+			return NULL;
+		}
+		return LiveH265VideoStreamDiscreteFramer::createNew(envir(), nalSource);
+	}
 
 	H264FramedLiveSource* liveSource = H264FramedLiveSource::createNew(envir());
 	if (liveSource == NULL)

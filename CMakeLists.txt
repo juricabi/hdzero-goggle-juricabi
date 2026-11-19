@@ -120,8 +120,13 @@ file(GLOB SRC_FILES_LANG "src/lang/*.c" "src/lang/*.h")
 file(GLOB SRC_FILES_PLATFORM "src/platform/*.c" "src/platform/*.h")
 # module bay control (src/module/module.h)
 file(GLOB SRC_FILES_MODULE "src/module/*.c" "src/module/*.h")
-# the lock around /sys/class/sunxi_dump, shared with the record daemon (src/record/soc_reg.h)
+# the lock around /sys/class/sunxi_dump, shared with the record daemon (src/record/soc_reg.h), and
+# what the HDMI audio boot step (src/boot/hdmi_audio_boot.c) decided for this boot (src/record/hdmi_boot.h)
 set(SRC_FILES_SOC_REG src/record/soc_reg.c)
+set(SRC_FILES_HDMI_BOOT
+	src/record/hdmi_boot.c
+	src/record/soc_reg.c
+)
 
 # Per-target driver swaps: the emulator provides its own implementations of certain
 # hardware drivers (src/emulator/*), so drop the goggle versions to avoid duplicate
@@ -159,7 +164,7 @@ set(SRC_FILES
 	${SRC_FILES_LANG}
 	${SRC_FILES_PLATFORM}
 	${SRC_FILES_MODULE}
-	${SRC_FILES_SOC_REG}
+	${SRC_FILES_HDMI_BOOT}
 )
 
 if(EMULATOR_BUILD)
@@ -288,6 +293,20 @@ if(NOT EMULATOR_BUILD)
 		minIni
 	)
 
+	# HDMI audio (experimental) boot step, run by rc.sh once per boot (src/boot/hdmi_audio_boot.c)
+	add_executable(hdmi_audio_boot
+		src/boot/hdmi_audio_boot.c
+		${SRC_FILES_HDMI_BOOT}
+	)
+	target_include_directories(hdmi_audio_boot PRIVATE
+		src/
+	)
+	target_link_libraries(hdmi_audio_boot PRIVATE
+		c
+		log
+		minIni
+	)
+
 	# image build
 	add_custom_target(MKAPP ALL
 		COMMAND rsync -r ${PROJECT_SOURCE_DIR}/mkapp ${CMAKE_CURRENT_BINARY_DIR}/
@@ -300,10 +319,11 @@ if(NOT EMULATOR_BUILD)
 		COMMAND cp record ${CMAKE_CURRENT_BINARY_DIR}/out/
 		COMMAND cp rtspLive ${CMAKE_CURRENT_BINARY_DIR}/out/
 		COMMAND cp ${PROJECT_NAME} ${OS_APP_PATH}
+		COMMAND cp hdmi_audio_boot ${OS_APP_PATH}
 		COMMAND cp record ${RECORD_APP_PATH}
 		COMMAND cp rtspLive ${RECORD_APP_PATH}
 		COMMAND cd ${CMAKE_CURRENT_BINARY_DIR} && ./mkapp/mkapp_ota.sh
-		DEPENDS MKAPP ${PROJECT_NAME} record rtspLive
+		DEPENDS MKAPP ${PROJECT_NAME} record rtspLive hdmi_audio_boot
 	)
 	add_custom_target(${PROJECT_NAME}-OTA ALL
 		DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/out/${PROJECT_NAME}

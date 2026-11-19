@@ -48,4 +48,7 @@ protected: // redefined virtual functions
 public:
     Boolean  _h265;
     char*    _streamName;
+
+    // live stream audio (RTSP AAC track)
+    Boolean  _audio;
 };

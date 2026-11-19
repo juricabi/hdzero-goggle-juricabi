@@ -560,3 +560,22 @@ void conf_saveAencParams(char* confFile, AencParams_t* para)
     ini_putl(SEC_AENC, KEY_AAC, para->codecType==PT_AAC, confFile);
     ini_putl(SEC_AENC, KEY_BPS, para->bitRate, confFile);
 }
+
+//----------------------------------------------------------------------------------------------
+// live stream audio (RTSP AAC track)
+//----------------------------------------------------------------------------------------------
+#define SEC_LIVE        "live"
+#define KEY_LIVE_AUDIO  "audio"
+
+bool conf_loadLiveAudio(char* confFile)
+{
+    return ini_getbool(SEC_LIVE, KEY_LIVE_AUDIO, 0, confFile) > 0;
+}
+
+#define KEY_LIVE_AUDIO_OFFSET "audio_offset_ms"
+
+int conf_loadLiveAudioOffset(char* confFile)
+{
+    long lValue = ini_getl(SEC_LIVE, KEY_LIVE_AUDIO_OFFSET, 0, confFile);
+    return check_set(lValue, -500, 500);
+}
