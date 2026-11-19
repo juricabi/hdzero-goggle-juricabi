@@ -73,7 +73,7 @@ firmware); its C tests and docs/hdmi-audio.md come with HDMI audio.
 
 | what | result |
 |---|---|
-| images, `build_all.sh` (goggle, goggle2, boxpro), Release with `-Werror` | built from the commit that records these results, no compiler warning (the `liblog.so` note only); the SHA-256 are in the `.sha256` files next to them |
+| images, `build_all.sh` (goggle, goggle2, boxpro), Release with `-Werror` | built from 34fa379 (the commit after it adds only this table's image list), no compiler warning (the `liblog.so` note only); listed below |
 | emulator builds (goggle, goggle2) | ripples' one warning (`page_version.c`) and no new one |
 | emulator start check, sandboxed (`emu_run.sh`, `keys/check_start.txt`), Goggle 1 and 2, three starts each (no setting.ini, ripples' shipped setting.ini, the setting.ini ripples wrote at its first start), against ripples' own emulator build | setting.ini after the start identical to ripples' in all six; the Module Bay page opens (Module None, Mode greyed, "Status: Off, bay pins untouched"), Check Pins answers "Not read: no GPIO access" (no GPIO in the sandbox); opening the page and leaving it writes nothing, no `[module]` section; no crash |
 | ripples' tests (`run_ripples_tests.sh`) | as in the baseline: all pass except `test_dvr_naming`'s build on glibc |
@@ -81,6 +81,14 @@ firmware); its C tests and docs/hdmi-audio.md come with HDMI audio.
 | `utilities/module_bay_test/mutants.sh` | 16 of 16 killed: `all`'s 11, `all`'s three module.c mutants of `c_mutants.sh` (the lock, two of three reads, the status), and two for ripples (a repeated power report sets the module up again; Dual counted as the bay being the source) |
 | `utilities/module_bay_test/check_strings.py` | 42 strings x 6 languages: translated, in the font, fitting |
 | `run_probe.sh run` / `mutants` | 65 pass / 18 of 18 killed (the same kit and suite as on `all`) |
+
+Images of phase 1 (built on the developer's machine, not released):
+
+| image | bytes | SHA-256 |
+|---|---|---|
+| HDZERO_GOGGLE-77-206-1.2.2-ripples-34fa379.bin | 10004480 | dedda956641c3903ceb162ebfc9a070ef6d9f3b68aec1415070f591682dba5f5 |
+| HDZERO_GOGGLE2-77-198-1.2.2-ripples-34fa379.bin | 12840960 | e3013bd8b310e37dd2a94578b8b677d6ffd47cb4ef826e9de6c75b227515904b |
+| HDZERO_BOXPRO-77-211-1.2.2-ripples-34fa379.bin | 9697280 | 77fdb0456af20d57c84e1836be0189311a521d2b179a73e067d20bfc4b88551a |
 
 Everything at a hardware boundary (sysfs GPIO, sunxi_dump, the DM5680) is a model written by the same engineers;
 nothing here replaces the goggle.
