@@ -23,6 +23,7 @@
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <sys/time.h>
+#include <time.h>
 #include <pthread.h>
 
 #include "avshare.h"
@@ -178,6 +179,7 @@ int avshare_uninit(void)
 {
 	CHECK_IsInitialized(0);
 
+	gAvshare.ptrConnect = NULL; // before the detach (avshare_dropConnections() from a signal handler)
 	if(shmdt(gAvshare.bufShare)==-1)
 	{
 		aloge("remove share mem failed\n");
@@ -381,10 +383,22 @@ void avshare_flush(void)
 //----------------------------------------------------------------------------------------------
 int avshare_connect(int media_type)
 {
+	CHECK_IsInitialized(-1);
+
 	if(!CHECK_IsConnect(media_type))
 	{
+		// Start this media from a clean ring (the writer restarts at slot 0
+		// while it sees the stream disconnected), then publish the connection.
+		int mediaIndex = MEDIA_type2index(media_type);
+		int i;
+		for(i=0; i<SHAREBUF_COUNT; i++)
+		{
+			gAvshare.bufStreamHead[mediaIndex][i].wflag = 1;
+		}
+		gAvshare.idxNext[mediaIndex] = 0;
+		gAvshare.posNext[mediaIndex] = 0;
+		__sync_synchronize();
 		SET_IsConnect(media_type, 1);
-		gAvshare.idxNext[media_type] = 0;
 	}
 
 	alogd("connect stream %d successfully: %d\n", media_type, CHECK_IsConnect(media_type));
@@ -404,7 +418,7 @@ int avshare_disconnect(int media_type)
 
 	for(i=0; i<SHAREBUF_COUNT; i++)
 	{
-		gAvshare.bufStreamHead[media_type][i].wflag = 1;
+		gAvshare.bufStreamHead[MEDIA_type2index(media_type)][i].wflag = 1;
 	}
 
 	alogd("disconnect stream %d successfully\n", media_type);
@@ -448,8 +462,8 @@ int avshare_readFrame(uint8_t*sFrameBuf, int nBufLen, struct timeval* timestamp,
         }
 	}
 
-    timestamp->tv_sec = (pStreamHead->timestamp/1000);          //s
-    timestamp->tv_usec= ((pStreamHead->timestamp%1000)*1000);   //us
+    __sync_synchronize(); // acquire: the slot was seen filled, now read it
+    avshare_timestampToTimeval(pStreamHead->timestamp, timestamp);  // CLOCK_MONOTONIC us -> wall clock
     *uDurationInMicroseconds = 0;
 
     frameType = (FrameType_e)pStreamHead->frameType;
@@ -457,6 +471,7 @@ int avshare_readFrame(uint8_t*sFrameBuf, int nBufLen, struct timeval* timestamp,
 
 	do
     {
+        __sync_synchronize(); // acquire: read the slot only after seeing it filled
         copyLen = pStreamHead->length - offset;
         if( frameLen + copyLen <= nBufLen )//MAXSTREAMBUF )
         {
@@ -472,6 +487,7 @@ int avshare_readFrame(uint8_t*sFrameBuf, int nBufLen, struct timeval* timestamp,
             break;
         }
 
+        __sync_synchronize(); // release: done reading the slot before freeing it
         pStreamHead->wflag = 1;
         idxBuf = (idxBuf+1) % SHAREBUF_COUNT;
         pStreamHead = (ShareStream_t*)&gAvshare.bufStreamHead[mediaIndex][idxBuf];;
@@ -653,8 +669,7 @@ void* avshare_task(void * param)
 
 bool avshare_start(void)
 {
-    avshare_init();
-    avshare_connect(MEDIA_VIDEO);
+    avshare_startMedia(MEDIA_VIDEO);
 
 #if(SAVE_FILE_TEST)
     gAvshare.bExit = false;
@@ -670,7 +685,6 @@ void avshare_stop(void)
         return;
     }
 
-    avshare_disconnect(MEDIA_VIDEO);
 #if(SAVE_FILE_TEST)
     if( gAvshare.threadId != 0 ) {
         gAvshare.bExit = true;
@@ -678,5 +692,312 @@ void avshare_stop(void)
         gAvshare.threadId = 0;
     }
 #endif
-    avshare_uninit();
+    avshare_stopMedia(MEDIA_VIDEO);
+}
+
+//----------------------------------------------------------------------------------------------
+// Live stream audio (RTSP AAC track) support
+//
+// Several sources in this process may use the ring at the same time (a video source and an
+// audio source), so the shared memory is attached once and every media is connected/disconnected
+// on its own. With only the video source in use this does exactly what avshare_start()/
+// avshare_stop() always did: attach + connect on start, disconnect + detach on stop.
+//
+// Ring protocol (one writer: the record process, one reader per media: this process):
+//   wflag == 1: slot free (writer may fill it), wflag == 0: slot filled (reader may read it).
+//   A frame occupies one or more consecutive slots: BUF_BEG_END, or BUF_BEGIN [BUF_MIDDLE...] BUF_END.
+//   The writer never overwrites a filled slot: when the ring is full it drops the new frame.
+//   timestamp: CLOCK_MONOTONIC in microseconds (see src/record/live_audio.c).
+//----------------------------------------------------------------------------------------------
+#define SLOT_WFLAG(h)   (*(volatile char*)&((h)->wflag))
+#define IS_FRAME_START(t) (((t) == BUF_BEGIN) || ((t) == BUF_BEG_END))
+#define IS_FRAME_END(t)   (((t) == BUF_END) || ((t) == BUF_BEG_END))
+
+static int gMediaUsers[MEDIA_NUM] = {0, 0};
+
+int avshare_startMedia(int media_type)
+{
+    int mediaIndex = MEDIA_type2index(media_type);
+    if( (mediaIndex < 0) || (mediaIndex >= MEDIA_NUM) ) {
+        return -1;
+    }
+
+    if( (gMediaUsers[0] + gMediaUsers[1] == 0) || (gAvshare.bufShare == NULL) ) {
+        if( avshare_init() != 0 ) {
+            return -1;
+        }
+    }
+
+    if( gMediaUsers[mediaIndex]++ == 0 ) {
+        avshare_connect(media_type);
+    }
+
+    return 0;
+}
+
+void avshare_stopMedia(int media_type)
+{
+    int mediaIndex = MEDIA_type2index(media_type);
+    if( (mediaIndex < 0) || (mediaIndex >= MEDIA_NUM) || (gMediaUsers[mediaIndex] == 0) ) {
+        return;
+    }
+
+    if( --gMediaUsers[mediaIndex] == 0 ) {
+        avshare_disconnect(media_type);
+    }
+
+    if( gMediaUsers[0] + gMediaUsers[1] == 0 ) {
+        avshare_uninit();
+    }
+}
+
+// Called on the way out (exit, SIGTERM/SIGINT/SIGHUP, crash): clear this process' connect flags,
+// so the record process stops the live encoders at once. Only stores to the shared memory: safe
+// in a signal handler. (The record process also notices a reader that died without it.)
+void avshare_dropConnections(void)
+{
+    uint8_t* volatile connect = gAvshare.ptrConnect;
+    int i;
+
+    if( (gAvshare.bufShare == NULL) || (connect == NULL) ) {
+        return;
+    }
+    for( i=0; i<MEDIA_NUM; i++ ) {
+        if( gMediaUsers[i] > 0 ) {
+            ((volatile uint8_t*)connect)[i] = 0;
+        }
+    }
+}
+
+void avshare_timestampToTimeval(uint64_t timestampUs, struct timeval* tv)
+{
+    // The record process stamps frames with CLOCK_MONOTONIC (shared by both processes).
+    // live555 wants wall-clock presentation times (RTCP sender reports pair them with
+    // gettimeofday()), so add one process-wide offset: audio and video stay consistent.
+    static bool     bOffsetValid = false;
+    static int64_t  offsetUs = 0;
+
+    if( !bOffsetValid ) {
+        struct timespec ts;
+        struct timeval now;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        gettimeofday(&now, NULL);
+        offsetUs = ((int64_t)now.tv_sec * 1000000 + now.tv_usec) -
+                   ((int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000);
+        bOffsetValid = true;
+    }
+
+    int64_t wallUs = (int64_t)timestampUs + offsetUs;
+    tv->tv_sec  = (time_t)(wallUs / 1000000);
+    tv->tv_usec = (suseconds_t)(wallUs % 1000000);
+}
+
+// Find the slot holding the oldest frame start, freeing orphan slots (the tail of a frame whose
+// beginning was dropped). Returns the slot index, or -1 if nothing is ready.
+static int avshare_findFrameStart(int mediaIndex)
+{
+    ShareStream_t* heads = gAvshare.bufStreamHead[mediaIndex];
+    int idx = gAvshare.idxNext[mediaIndex];
+    int n;
+
+    if( SLOT_WFLAG(&heads[idx]) != 0 ) {
+        // Nothing where we expect the next frame. Look elsewhere: after a reconnect the writer
+        // may still be writing from another position.
+        int found = -1;
+        for( n=1; n<SHAREBUF_COUNT; n++ ) {
+            int j = (idx + n) % SHAREBUF_COUNT;
+            if( SLOT_WFLAG(&heads[j]) == 0 ) {
+                found = j;
+                break;
+            }
+        }
+        if( found < 0 ) {
+            return -1;
+        }
+        __sync_synchronize();
+        // The writer fills slots in order, so if it had just filled our slot we would see it now.
+        if( SLOT_WFLAG(&heads[idx]) != 0 ) {
+            idx = found;
+        }
+    }
+    __sync_synchronize();
+
+    for( n=0; n<SHAREBUF_COUNT; n++ ) {
+        ShareStream_t* h = &heads[idx];
+        if( SLOT_WFLAG(h) != 0 ) {
+            gAvshare.idxNext[mediaIndex] = idx;
+            return -1;
+        }
+        if( IS_FRAME_START(h->buff_type) ) {
+            gAvshare.idxNext[mediaIndex] = idx;
+            return idx;
+        }
+        // orphan BUF_MIDDLE/BUF_END: release it
+        __sync_synchronize();
+        SLOT_WFLAG(h) = 1;
+        idx = (idx + 1) % SHAREBUF_COUNT;
+    }
+
+    gAvshare.idxNext[mediaIndex] = idx;
+    return -1;
+}
+
+// A frame the writer gave up half-way (the video writer, avshare_add(), stops when the ring is
+// full and then drops frames until the next I frame) is discarded when the next frame start
+// appears behind it. But while it is kept, its slots are not free: a next frame larger than the
+// rest of the ring (an I frame above half the ring, ~280 KiB) cannot complete either and would be
+// kept the same way, frame after frame. The writer fills a frame's slots in one go, so a partial
+// frame that has not grown for PARTIAL_TIMEOUT_US is given up here too.
+#define PARTIAL_TIMEOUT_US  100000
+
+static struct {
+    int      start;    // first slot of the partial frame seen last, -1: none
+    int      nSlots;   // filled slots it had
+    uint64_t sinceUs;  // when it was first seen that way
+} gPartial[MEDIA_NUM] = { {-1, 0, 0}, {-1, 0, 0} };
+
+static uint64_t avshare_nowUs(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static bool avshare_partialStalled(int mediaIndex, int start, int nSlots)
+{
+    uint64_t now = avshare_nowUs();
+    if( (gPartial[mediaIndex].start != start) || (gPartial[mediaIndex].nSlots != nSlots) ) {
+        gPartial[mediaIndex].start = start;
+        gPartial[mediaIndex].nSlots = nSlots;
+        gPartial[mediaIndex].sinceUs = now;
+        return false;
+    }
+    return (now - gPartial[mediaIndex].sinceUs) >= PARTIAL_TIMEOUT_US;
+}
+
+int avshare_readMediaFrame(int media_type, uint8_t* buf, int bufLen, uint64_t* timestampUs)
+{
+    int mediaIndex = MEDIA_type2index(media_type);
+    int attempt;
+
+    CHECK_IsInitialized(-1);
+    if( (mediaIndex < 0) || (mediaIndex >= MEDIA_NUM) || !CHECK_IsConnect(media_type) ) {
+        return -1;
+    }
+
+    ShareStream_t* heads = gAvshare.bufStreamHead[mediaIndex];
+
+    // A partial frame followed by a new frame start is discarded and the scan restarts once.
+    for( attempt=0; attempt<2; attempt++ ) {
+        int start = avshare_findFrameStart(mediaIndex);
+        if( start < 0 ) {
+            return 0;
+        }
+
+        int idx = start;
+        int len = 0;
+        int nSlots = 0;
+        bool overflow = false;
+        bool restart = false;
+        bool complete = false;
+        bool stalled = false;
+        uint64_t ts = heads[start].timestamp;
+
+        while( nSlots < SHAREBUF_COUNT ) {
+            ShareStream_t* h = &heads[idx];
+            if( SLOT_WFLAG(h) != 0 ) {
+                // writer has not finished this frame yet: try again later (unless it gave up)
+                if( (nSlots == 0) || !avshare_partialStalled(mediaIndex, start, nSlots) ) {
+                    return 0;
+                }
+                stalled = true;
+                break;
+            }
+            // acquire: read the slot's header and data only after seeing it filled (ARMv7 may
+            // satisfy these loads before the wflag load: a control dependency does not order loads)
+            __sync_synchronize();
+            if( (nSlots > 0) && IS_FRAME_START(h->buff_type) ) {
+                // the writer gave up on the previous frame (ring was full): drop the partial frame
+                restart = true;
+                break;
+            }
+
+            int length = h->length;
+            if( (length < 0) || (length > ((mediaIndex == 0) ? (largeStreamSize) : (audioStreamSize))) ) {
+                length = 0;
+            }
+            if( !overflow && (len + length <= bufLen) ) {
+                memcpy(buf + len, gAvshare.streamBuf[mediaIndex][idx], length);
+                len += length;
+            }
+            else {
+                overflow = true;
+            }
+
+            nSlots++;
+            complete = IS_FRAME_END(h->buff_type);
+            idx = (idx + 1) % SHAREBUF_COUNT;
+            if( complete ) {
+                break;
+            }
+        }
+
+        // release the slots of this frame (or of the partial frame being dropped)
+        __sync_synchronize();
+        int i;
+        for( i=0; i<nSlots; i++ ) {
+            SLOT_WFLAG(&heads[(start + i) % SHAREBUF_COUNT]) = 1;
+        }
+        gAvshare.idxNext[mediaIndex] = idx;
+        gAvshare.posNext[mediaIndex] = 0;
+        gPartial[mediaIndex].start = -1;
+
+        if( stalled ) {
+            alogd("drop partial %s frame (%d slots), the writer gave up on it\n", (mediaIndex == 0) ? "video" : "audio", nSlots);
+            return -2;
+        }
+        if( restart ) {
+            continue;
+        }
+        if( !complete ) {
+            // a frame filling the whole ring without an end: unusable
+            return -2;
+        }
+        if( overflow ) {
+            alogd("drop %s frame, larger than %d bytes\n", (mediaIndex == 0) ? "video" : "audio", bufLen);
+            return -2;
+        }
+
+        *timestampUs = ts;
+        return len;
+    }
+
+    return 0;
+}
+
+int avshare_peekAudio(uint8_t* buf, int bufLen)
+{
+    int mediaIndex = MEDIA_type2index(MEDIA_AUDIO);
+
+    CHECK_IsInitialized(-1);
+    if( !CHECK_IsConnect(MEDIA_AUDIO) ) {
+        return -1;
+    }
+
+    int start = avshare_findFrameStart(mediaIndex);
+    if( start < 0 ) {
+        return 0;
+    }
+
+    ShareStream_t* h = &gAvshare.bufStreamHead[mediaIndex][start];
+    int len = h->length;
+    if( len > bufLen ) {
+        len = bufLen;
+    }
+    if( len < 0 ) {
+        len = 0;
+    }
+    memcpy(buf, gAvshare.streamBuf[mediaIndex][start], len);
+
+    return len;
 }

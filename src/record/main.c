@@ -256,6 +256,51 @@ inline static bool record_isArecording(RecordContext_t *recCtx) {
     return record_isGoing(recCtx->vv) && recCtx->params.enableAudio;
 }
 
+/*
+ * Users of the audio input (AI) device: one MPP AI device, every user has a channel on it. A user
+ * that stops may disable the device only when no other user holds it: ask aidev_heldByOthers().
+ * Register further users in the enum and table.
+ */
+typedef enum {
+    AIUSER_recording,  // recording with audio (ai2aenc, recCtx->aa)
+    AIUSER_loopback,   // AI -> AO loop (ai2ao, recCtx->ao)
+    AIUSER_liveStream, // live stream audio (live_audio.c)
+    AIUSER_hdmiBridge, // HDMI out audio: AI -> I2S0 (pcmbridge.c, src=ai)
+    AIUSER_NUM
+} AiUser_e;
+
+static bool aiuser_recording(RecordContext_t *recCtx) { return (recCtx->vv != NULL) && record_isArecording(recCtx); }
+static bool aiuser_loopback(RecordContext_t *recCtx) { return (recCtx->ao != NULL) && ai2ao_playing(recCtx->ao); }
+static bool aiuser_liveStream(RecordContext_t *recCtx) { return liveaudio_running(&recCtx->liveAudio); }
+static bool aiuser_hdmiBridge(RecordContext_t *recCtx) { return pcmbridge_usesAi(recCtx->hdmiAudio); }
+
+static bool (*const aiUsers[AIUSER_NUM])(RecordContext_t *recCtx) = {
+    [AIUSER_recording] = aiuser_recording,
+    [AIUSER_loopback] = aiuser_loopback,
+    [AIUSER_liveStream] = aiuser_liveStream,
+    [AIUSER_hdmiBridge] = aiuser_hdmiBridge,
+};
+
+static bool aidev_heldByOthers(RecordContext_t *recCtx, AiUser_e self) {
+    for (int i = 0; i < AIUSER_NUM; i++) {
+        if ((i != (int)self) && aiUsers[i](recCtx)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * Live stream audio reads its conf ([live] audio and audio_offset_ms, [ai], [aenc]) from the file this
+ * recorder chose by record_checkConf() (on the goggle the app's record.conf: the file the WiFi page writes
+ * Stream Audio into and rtspLive reads), not from ctx->confFile: once the app's DVR control has sent its
+ * first config, ctx->confFile is one of the app's snapshots (src/core/dvr.c copies record.conf once when the
+ * app starts and then publishes edited copies with its own [vi], [venc] and [record] keys), so a Stream Audio
+ * change or a hand edit of [live] after the app's start would never reach the stream. The snapshots never
+ * change [ai], [aenc] or [live].
+ */
+static char liveConfFile[MAX_pathLEN];
+
 static int record_close_error;
 static bool control_paused;
 static int control_queue = -1;
@@ -282,8 +327,7 @@ void record_stop(RecordContext_t *recCtx) {
     }
 
     if (recCtx->params.enableAudio) {
-        bool aoplay = ai2ao_playing(recCtx->ao);
-        ai2aenc_stop(recCtx->aa, !aoplay);
+        ai2aenc_stop(recCtx->aa, !aidev_heldByOthers(recCtx, AIUSER_recording));
     }
 
     vi2venc_stop(recCtx->vv, !record_isGoing(recCtx->vvLive));
@@ -717,7 +761,7 @@ int vvLive_onFrame(void *vvPtr, uint8_t *frameData, int frameLen, VencFrameType_
         }
     }
 
-    pts2 = (pts - recCtx->ptsBaseLive) / 1000; // unit us to ms
+    pts2 = liveclock_stamp(&recCtx->liveVideoClock, pts); // CLOCK_MONOTONIC us, shared with live audio
     // LOGD("%llu, %llu", pts2, recCtx->ptsBaseLive);
 
     if (frameType == FRAME_typeI) {
@@ -964,6 +1008,7 @@ int live_start(RecordContext_t *recCtx) {
 
     recCtx->nbFramesLive = 0;
     recCtx->ptsBaseLive = 0;
+    liveclock_reset(&recCtx->liveVideoClock, "video");
 
     record_dumpViParams(&viParams);
     record_dumpVeParams(&veParams);
@@ -992,6 +1037,9 @@ static inline void live_run(RecordContext_t *recCtx) {
     } else {
         live_stop(recCtx);
     }
+
+    // live stream audio: runs while rtspLive reads the audio track (its conf: liveConfFile, see there)
+    liveaudio_run(&recCtx->liveAudio, liveConfFile, aidev_heldByOthers(recCtx, AIUSER_liveStream));
 }
 
 void record_checkConf(RecordContext_t *recCtx, char *confSet) {
@@ -1141,6 +1189,7 @@ void main_loop(RecordContext_t *recCtx, bool retryLegacyConf) {
                     if (strcmp(previousConf, recCtx->confFile) != 0) {
                         rec_dbg_log("config_select retry old='%s' new='%s'",
                                     previousConf, recCtx->confFile);
+                        strcpy(liveConfFile, recCtx->confFile); // (the file the recorder chose)
                     }
                 }
                 conf_loadRecordParams(recCtx->confFile, &recCtx->params);
@@ -1171,8 +1220,20 @@ void main_loop(RecordContext_t *recCtx, bool retryLegacyConf) {
             break;
         }
         case AIO_cmdSTOP:
-            ai2ao_stop(recCtx->ao, !record_isArecording(recCtx));
+            ai2ao_stop(recCtx->ao, !aidev_heldByOthers(recCtx, AIUSER_loopback));
             break;
+        /* ---- HDMI audio bridge (experimental, sent only when setting.ini [hdmi] enables it) ---- */
+        case HDMIA_cmdSTART: {
+            AiParams_t aiParams;
+            ZeroMemory(&aiParams, sizeof(aiParams));
+            conf_loadAiParams(recCtx->confFile, &aiParams);
+            pcmbridge_start(recCtx->hdmiAudio, recCtx->confFile, &aiParams, !aidev_heldByOthers(recCtx, AIUSER_hdmiBridge));
+            break;
+        }
+        case HDMIA_cmdSTOP:
+            pcmbridge_stop(recCtx->hdmiAudio, !aidev_heldByOthers(recCtx, AIUSER_hdmiBridge));
+            break;
+        /* ---- end HDMI audio bridge ---- */
         case LIVE_cmdSTART:
             if (control_paused) break;
             recCtx->enableLive = true;
@@ -1231,6 +1292,7 @@ int main(int argc, char *argv[]) {
     ZeroMemory(&recCtx, sizeof(recCtx));
     record_checkConf(&recCtx, (argc > 1) ? argv[1] : NULL);
     LOGD("record conf: %s", recCtx.confFile);
+    strcpy(liveConfFile, recCtx.confFile); // live stream audio's conf (see there)
 
     recCtx.nbFileIndex = 0;
     recCtx.nbFramesTotal = 0;
@@ -1239,6 +1301,7 @@ int main(int argc, char *argv[]) {
     recCtx.vv = NULL;
     recCtx.aa = NULL;
     recCtx.ao = NULL;
+    recCtx.hdmiAudio = NULL;
     recCtx.stateGo = REC_statIdle;
     recCtx.stateGoing = REC_statIdle;
     recCtx.status = REC_statSave;
@@ -1267,14 +1330,25 @@ int main(int argc, char *argv[]) {
     }
 
     recCtx.ao = ai2ao_initSys();
+    recCtx.hdmiAudio = pcmbridge_initSys(); // HDMI audio (experimental), idle until HDMIA_cmdSTART
     avshare_init();
+    if (!liveaudio_init(&recCtx.liveAudio)) {
+        LOGE("live audio init failed");
+    }
 
     main_loop(&recCtx, argc <= 1);
 
 failed:
     LOGD("exit ...");
 
+    liveaudio_stop(&recCtx.liveAudio, aidev_heldByOthers(&recCtx, AIUSER_liveStream));
+    liveaudio_deinit(&recCtx.liveAudio);
     record_stop(&recCtx);
+    pcmbridge_deinitSys(recCtx.hdmiAudio, !aidev_heldByOthers(&recCtx, AIUSER_hdmiBridge));
+    recCtx.hdmiAudio = NULL; // freed: no longer a user
+    if (aiuser_loopback(&recCtx)) { // ai2ao_deinitSys() does not stop a running loop
+        ai2ao_stop(recCtx.ao, !aidev_heldByOthers(&recCtx, AIUSER_loopback));
+    }
     ai2ao_deinitSys(recCtx.ao);
     ai2aenc_deinitSys(recCtx.aa);
     vi2live_deinitSys(recCtx.vvLive);

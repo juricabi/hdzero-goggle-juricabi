@@ -7,9 +7,11 @@ extern "C" {
 #include "vi2venc.h"
 #include "ai2aenc.h"
 #include "ai2ao.h"
+#include "pcmbridge.h" // HDMI audio (experimental)
 #include "ffpack.h"
 #include "disk.h"
 #include "record_definitions.h"
+#include "live_audio.h"
 
 typedef enum
 {
@@ -79,6 +81,7 @@ typedef struct
     Vi2Venc_t* vvLive;
     Ai2Aenc_t* aa;
     Ai2Ao_t*   ao;
+    PcmBridge_t* hdmiAudio; // HDMI audio bridge (experimental, idle unless HDMIA_cmdSTART)
     FFPack_t*  ff;
     uint32_t   tickBegin;
     uint32_t   nbFramesTotal;
@@ -105,6 +108,10 @@ typedef struct
     uint32_t nbFramesLive;
     uint64_t ptsBaseLive;
     VencSpspps_t spspps;
+
+    // live stream audio (RTSP AAC track), see live_audio.h
+    LiveClock_t liveVideoClock;
+    LiveAudio_t liveAudio;
 } RecordContext_t;
 
 #ifdef __cplusplus

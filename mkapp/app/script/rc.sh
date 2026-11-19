@@ -104,6 +104,12 @@ seed_adjtime
 #config UART and VDPO
 config_uart_vdpo
 
+#HDMI audio (experimental, off by default): with [hdmi] audio_out=1 only, PH1-PH3 to I2S0 for
+#this boot (checked against the value setup_uart just wrote); otherwise nothing is touched
+if [ -x /mnt/app/app/hdmi_audio_boot ]; then
+	/mnt/app/app/hdmi_audio_boot
+fi
+
 #check boot&os file, update if exist
 update_boot
 

@@ -8,10 +8,11 @@
  * each other's register. A write ("addr value" > write) does not use the latch.
  *
  * Every user in this firmware takes the same lock, HDMIA_LOCK_FILE (flock), around
- * its accesses: the app's aww/awr calls (system_exec_sunxi_dump()), the module bay
- * (src/module/module.c) and the probe scripts (utilities/probe). Users that cannot take
- * it (stock scripts) are caught by the verified read: three reads that must agree, each
- * in the exact format of the driver.
+ * its accesses: the HDMI audio boot step (hdmi_boot.c), the record daemon's HDMI audio
+ * bridge (pcmbridge.c), the app's aww/awr calls (system_exec_sunxi_dump()), the module
+ * bay (src/module/module.c) and the probe scripts (utilities/probe). Users that cannot
+ * take it (see docs/hdmi-audio.md, "sunxi_dump users") are caught by the verified read:
+ * three reads that must agree, each in the exact format of the driver.
  * ======================================================================== */
 #ifdef __cplusplus
 extern "C" {

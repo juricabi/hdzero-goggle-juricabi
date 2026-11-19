@@ -23,6 +23,7 @@
 #define LIVE_streamNAME     "hdzero"
 #define LIVE_rtspPORT       8554
 #define LIVE_rtspMULTICAST  true
+#define LIVE_AUDIO          false
 
 #define ZeroMemory(p, size) memset(p, 0, size)
 
@@ -51,4 +52,7 @@ typedef struct
     bool  IsMulticast;
     bool  isSSM;
     char  ipMulticast[16];
+
+    // live stream audio (RTSP AAC track): [live] audio, default off
+    bool     audio;
 } LiveContext_t;
