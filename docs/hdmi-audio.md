@@ -17,7 +17,7 @@ same `rc.sh` register writes (section 2), so it runs the same code with the same
 On all three the board wiring is unknown until the read-only probe has run on the device
 (section 7): **HDMI audio on is NO-GO before that**, on the BoxPro as on the goggles.
 
-**On `ripples-all`** (ripples' firmware 1.2.2 with this project's additions, docs/status.md) the
+**In juricabi's firmware** (ripples' firmware 1.2.2 with this project's additions, docs/status.md) the
 same code is ported from `all` (082b2f5): the boot step and its record, the IT66121 Reg04 guard, the
 IT66021 EDID (merged with ripples' own EDID timings, whose checksum the 48 kHz-only EDID adjusts),
 the bridge in ripples' recorder, the shared `/tmp/.sunxi_dump.lock`, the BoxPro included, all off
@@ -312,7 +312,7 @@ start/stop/exit order by `utilities/live_audio_test/t_aidev.sh`).
 
 What HDMI out carries is the ADC capture, the same signal as the DVR and the WiFi stream:
 the Audio page's Recording section decides it (Record Headphone Mix, Record Mic / Line In /
-A/V In, Record Level; on `ripples-all` ripples' Audio Source, the preset of the Record rows, and
+A/V In, Record Level; in juricabi's firmware ripples' Audio Source, the preset of the Record rows, and
 Line/AV Gain, the level), not the headphone volume.
 
 Flow: HDMI Out Audio On (`setting.ini [hdmi] audio_out=1`, stored by the Audio page) ->
@@ -359,7 +359,7 @@ audio off for the rest of the boot ("audio path failed").
 
 ### HDMI-in audio as a mixer source: headphones and recording (HDMI In Audio = On)
 
-**On `ripples-all`** as described here (the audio mixer, docs/audio.md). The line-out volume is
+**In juricabi's firmware** as described here (the audio mixer, docs/audio.md). The line-out volume is
 ripples' Live Volume, the ADC input gain ripples' Line/AV Gain. DVR playback (ripples' own code,
 the mixer held meanwhile) takes the DAC for itself, and the mixer puts HDMI-in audio back
 afterwards.

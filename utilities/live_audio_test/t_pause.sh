@@ -1,5 +1,5 @@
 #!/bin/bash
-# ripples-all: before a source switch the app pauses the recorder (RECORD_PAUSE: it stops the live video encoder
+# juricabi: before a source switch the app pauses the recorder (RECORD_PAUSE: it stops the live video encoder
 # and ripples' avshare_reset() flushes the ring for the next video bitstream), after it the app resumes it
 # (RECORD_LIVE_STOP with a config snapshot); ctl_conf stands in for the app. The stream audio runs on through
 # both: its chain is not stopped, and its side of the ring is not reset (avshare_reset() flushes the video side

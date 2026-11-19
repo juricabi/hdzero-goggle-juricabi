@@ -1,5 +1,5 @@
 /*
- * Host harness for the audio mixer (ripples-all): runs ripples' real settings_load()
+ * Host harness for the audio mixer (juricabi): runs ripples' real settings_load()
  * (src/core/settings.c) and the real src/core/audio_mixer.c and audio_mixer_routing.c (worker
  * thread, setting.ini through the real minIni) against a simulated codec. Driven by
  * test_mixer.py, one command per line on stdin:

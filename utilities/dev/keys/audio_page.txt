@@ -1,4 +1,4 @@
-# Goggle 1, Goggle 2 or BoxPro (ripples-all), started in the main menu: 2 s untouched (c00), Audio (k s 7 from
+# Goggle 1, Goggle 2 or BoxPro (juricabi), started in the main menu: 2 s untouched (c00), Audio (k s 7 from
 # the top): every row selected in turn with a screenshot (19 rows on Goggle 2 / BoxPro, 18 on Goggle 1: the last
 # steps wrap to the top), the page left without a change (c09): nothing written
 w 2

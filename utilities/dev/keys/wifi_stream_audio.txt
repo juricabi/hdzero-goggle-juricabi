@@ -1,4 +1,4 @@
-# Goggle 1, Goggle 2 or BoxPro (ripples-all, WiFi Module page present): 2 s untouched (c00), WiFi Module
+# Goggle 1, Goggle 2 or BoxPro (juricabi, WiFi Module page present): 2 s untouched (c00), WiFi Module
 # (k s 10 from the top) > Page: System, the Stream Audio row, clicked (On, not applied), the page left (c09):
 # without Apply Settings nothing is written
 w 2

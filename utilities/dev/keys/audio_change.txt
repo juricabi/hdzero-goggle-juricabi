@@ -1,4 +1,4 @@
-# Goggle 2 or BoxPro (ripples-all), started in the main menu: Audio page, changes (c00 before, c01..c04 after each),
+# Goggle 2 or BoxPro (juricabi), started in the main menu: Audio page, changes (c00 before, c01..c04 after each),
 # then left (c09); the keys written as below from ripples' setting.ini (another start writes its own values):
 #  1. Mic (the 8th row) one step up: [mixer] mic=1, phones_at_boot=1, version=2
 #  2. Record Headphone Mix (4 rows below) Yes: [mixer] rec_mix=1

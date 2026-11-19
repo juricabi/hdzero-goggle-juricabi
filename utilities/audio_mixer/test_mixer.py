@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host test of the audio mixer on ripples-all: ripples' real settings_load() (src/core/settings.c),
+"""Host test of the audio mixer in juricabi's firmware: ripples' real settings_load() (src/core/settings.c),
 then the real src/core/audio_mixer.c and audio_mixer_routing.c (worker, setting.ini through minIni,
 the batches written for amixer) against a model of the codec's signal graph (codec_model.py, from
 the driver's DAPM routes).
@@ -18,7 +18,7 @@ For every target (Goggle, Goggle 2, BoxPro):
   settings    compatibility both ways (docs/audio.md): a setting.ini of stock ripples 1.2.2, one of
               all's firmware (082b2f5), a fresh one: the values in effect, nothing written at
               start-up, nothing written by a save without a change, all's keys kept for all; the
-              round trip ripples-all -> stock ripples -> ripples-all (Audio Source, Live Volume)
+              round trip juricabi -> stock ripples -> juricabi (Audio Source, Live Volume)
   migration   ripples' firmware (libmedia_mpp reset + ripples' dvr.c and audio_sel.sh) vs the mixer,
               per Audio Source and Live Volume: recording, headphones, line out power and the
               receiver's audio switch must be the same (the documented difference: booting
@@ -59,7 +59,7 @@ RECORD_KEYS = ["live_audio_volume", "mic_gain", "linein_gain", "audio_source"]  
 KEYS = MIXER_KEYS + RECORD_KEYS
 MAX = {"mic": 8, "line_in": 8, "av": 8, "hdmi": 8, "rec_mix": 1, "rec_mic": 1, "rec_line_in": 1, "rec_av": 1,
        "rx_audio": 1, "phones_at_boot": 1, "live_audio_volume": 10, "mic_gain": 7, "linein_gain": 7, "audio_source": 2}
-# all's [mixer] keys that ripples-all does not use (ripples' controls instead): kept in setting.ini
+# all's [mixer] keys that juricabi's firmware does not use (ripples' controls instead): kept in setting.ini
 ALL_ONLY_KEYS = ["headphones", "playback", "mic_boost", "line_in_boost", "dvr_level"]
 VERSION = "2"
 # the Record source switch of each analog source, and its headphone level
@@ -191,7 +191,7 @@ def codec_lines(state):
 
 
 def mixer_ini(values, extra_record=None):
-    """A setting.ini of ripples-all: ripples' keys in [record], the rest in [mixer] (version 2)."""
+    """A setting.ini of juricabi's firmware: ripples' keys in [record], the rest in [mixer] (version 2)."""
     record = {k: v for k, v in values.items() if k in RECORD_KEYS}
     record.update(extra_record or {})
     mixer = {k: v for k, v in values.items() if k not in RECORD_KEYS}
@@ -614,7 +614,7 @@ def test_settings(h):
         else:
             ok(test)
 
-    # back to stock ripples after ripples-all changed its rows: ripples reads its own keys as written
+    # back to stock ripples after juricabi's firmware changed its rows: ripples reads its own keys as written
     test = f"{h.target} settings: back to stock ripples"
     _, _, _, _, after = h.run(ripples_ini(0, 10, 4, 3), START + ["set_source 2", "set_live 6", "set mic_gain 2", "set linein_gain 6",
                                                                 "set rec_mix 1", "save"])
@@ -650,11 +650,11 @@ ROUND_KEYS = ["rec_mic", "rec_line_in", "rec_av", "rx_audio", "av", "audio_sourc
 
 
 def test_round_trip(h):
-    """ripples-all -> stock ripples -> ripples-all (review of phase 3, finding 2): what stock ripples
+    """juricabi -> stock ripples -> juricabi (review of phase 3, finding 2): what stock ripples
     changed in [record] wins over the [mixer] values derived from the earlier [record] values; nothing
     is written at the start; the next change writes them; what ripples did not change stays."""
     cases = (
-        # name, ripples-all steps, the [record] edit of stock ripples, values in effect afterwards
+        # name, juricabi steps, the [record] edit of stock ripples, values in effect afterwards
         ("Audio Source Line In, then ripples Mic", ["set_source 1"], ("audio_source", 0),
          dict(rec_mic=1, rec_line_in=0, rec_av=0, rx_audio=0, audio_source=0)),
         ("Audio Source Line In, then ripples A/V In", ["set_source 1"], ("audio_source", 2),
@@ -693,7 +693,7 @@ def test_round_trip(h):
             if any(again[k] != v for k, v in want.items()):
                 fail(test, f"after the next change and a restart: {again}, want {want}")
             elif section(saved, "record").get(key) != str(value):
-                fail(test, f"[record] {key} changed by ripples-all: {section(saved, 'record')}")
+                fail(test, f"[record] {key} changed by juricabi's firmware: {section(saved, 'record')}")
             else:
                 ok(test)
 

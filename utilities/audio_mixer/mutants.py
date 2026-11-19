@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Mutation check of test_mixer.py on ripples-all: every mutant of the mixer sources must make it fail.
+"""Mutation check of test_mixer.py in juricabi's firmware: every mutant of the mixer sources must make it fail.
 
     utilities/audio_mixer/mutants.py [--targets HDZGOGGLE2,...] [name filter]
 
 Each mutant is one small change to a copy of src/core/audio_mixer*.c; test_mixer.py runs against
 the copy (--src). all's mutants (082b2f5) that still apply, the ones of all's reviews among them,
-and the ones of ripples-all's own rules (ripples' controls, the presets, the settings both ways,
+and the ones of juricabi's own rules (ripples' controls, the presets, the settings both ways,
 hold), and the fixes of the review of phase 3 (the held batch, holders, the timeslot volumes, the round
 trip through stock ripples). Exit status 1 if a mutant survives (or the unmodified copy fails).
 """
@@ -188,7 +188,7 @@ MUTANTS = [
     ("save: ripples' keys written without a change", M, [
         ("        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i))) {",
          "        if (current.value[i] != saved.value[i] || (stale & FIELD_BIT(i)) || strcmp(field_ini[i].section, RECORD_SECTION) == 0) {")]),
-    # ---- the round trip ripples-all -> stock ripples -> ripples-all (review of phase 3, finding 2)
+    # ---- the round trip juricabi -> stock ripples -> juricabi (review of phase 3, finding 2)
     ("round trip: record_source ignored", M, [
         ("    if (file_basis_source != NO_KEY && file_basis_source != rec->audio_source) {",
          "    if (file_basis_source != NO_KEY && file_basis_source != rec->audio_source && 0) {")]),

@@ -1,4 +1,4 @@
-// Stands in for the app's DVR control on ripples-all (src/core/dvr.c): publishes a config snapshot the way it
+// Stands in for the app's DVR control in juricabi's firmware (src/core/dvr.c): publishes a config snapshot the way it
 // does (a copy of the given file as /tmp/hdz-dvr-control/<pid>/record-<n>.conf, directory 0700, file 0600) and
 // sends RECORD_CONFIG (or the command given) on ripples' record control queue (lib/log record_control.c); prints
 // the recorder's answer.

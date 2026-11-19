@@ -3,7 +3,7 @@
 The goggle can set the channel (and on some modules the mode) of an analog
 receiver module in the expansion module bay: dial, buttons, ELRS backpack. Menu:
 **Module Bay** (Goggle 1 and Goggle 2, the entry before Go Sleep!). It follows
-pkendall64's analog-module-control. This page describes it on `ripples-all`: ripples'
+pkendall64's analog-module-control. This page describes it in juricabi's firmware: ripples'
 firmware 1.2.2 (LVTY-AI/hdzero-goggle 4fbb865) with the module bay ported from `all`.
 
 **It needs a hardware mod, for every module type.** On a stock goggle no control
@@ -387,7 +387,7 @@ ExpressLRS Backpack's `targets/`.
 ## Host tests (no hardware)
 
 `make -C utilities/module_bay_test test` (plain gcc on a PC, ~2 minutes, real
-time): **170 checks, all pass** (on `ripples-all`); `utilities/module_bay_test/mutants.sh`:
+time): **170 checks, all pass** (in juricabi's firmware); `utilities/module_bay_test/mutants.sh`:
 every mutant of `src/module` is killed; `utilities/module_bay_test/check_strings.py`:
 every string of the page translated, in the font and fitting, in every language.
 
