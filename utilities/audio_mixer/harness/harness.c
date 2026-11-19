@@ -279,8 +279,6 @@ int main(void) {
             out("WAIT %s\n", audio_mixer_apply_wait(5000) ? "ok" : "timeout");
         } else if (strcmp(line, "rx") == 0) {
             out("RX %d\n", audio_mixer_rx_audio());
-        } else if (strcmp(line, "preset") == 0) {
-            out("PRESET %d\n", audio_mixer_is_preset());
         } else if (strcmp(line, "mark") == 0) {
             out("MARK\n");
         } else if (strcmp(line, "unsaved") == 0) {
@@ -294,15 +292,11 @@ int main(void) {
             pthread_mutex_unlock(&out_mutex);
             pthread_mutex_unlock(&codec_mutex);
         } else if (sscanf(line, "set_live %d", &value) == 1) {
-            audio_mixer_set_live_volume(value);
-        } else if (sscanf(line, "set_source %d", &value) == 1) {
-            audio_mixer_set_source(value);
+            audio_mixer_set(AUDIO_MIXER_LIVE_VOLUME, value); // (Headphone Volume: no longer moves A/V In)
         } else if (sscanf(line, "set %255s %d", arg1, &value) == 2) {
             audio_mixer_set(field_of(arg1), value);
         } else if (sscanf(line, "get %255s", arg1) == 1) {
             out("GET %s %d\n", arg1, audio_mixer_get(field_of(arg1)));
-        } else if (sscanf(line, "inmix %255s", arg1) == 1) {
-            out("INMIX %s %d\n", arg1, audio_mixer_recorded_via_mix(field_of(arg1)));
         } else if (sscanf(line, "line_out %d", &value) == 1) {
             audio_mixer_set_line_out(value != 0);
         } else if (sscanf(line, "live_dac %d", &value) == 1) {

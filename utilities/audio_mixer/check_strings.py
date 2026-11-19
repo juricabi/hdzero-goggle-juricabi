@@ -36,18 +36,19 @@ def page_strings():
     out = []
     for m in re.finditer(r'^\s*HEADING\("([^"]+)"\)', src, re.M):
         out.append(("heading", m.group(1)))
-    for m in re.finditer(r'^\s*(?:SLIDER|YES_NO)\([^,"]+,\s*"([^"]+)",\s*"([^"]+)"\)', src, re.M):
+    for m in re.finditer(r'^\s*SLIDER\([^,"]+,\s*"([^"]+)",\s*"([^"]+)"\)', src, re.M):
         out += [("label", m.group(1)), ("hint", m.group(2))]
-    for m in re.finditer(r'^\s*ON_OFF\([^,"]+,\s*[^,"]+,\s*"([^"]+)",\s*"([^"]+)"\)', src, re.M):
+    for m in re.finditer(r'^\s*INPUT\([^,"]+,\s*[^,"]+,\s*"([^"]+)",\s*"([^"]+)"\)', src, re.M):
         out += [("label", m.group(1)), ("hint", m.group(2))]
-    for m in re.finditer(r'^\s*RECORD_SOURCE\([^,"]+,\s*"([^"]+)"\)', src, re.M):
-        out.append(("label", m.group(1)))
-    # ripples' rows (explicit initializers): their names and hints
-    for m in re.finditer(r'^\s*\{\.type = ROW_\w+, \.field = \w+, \.name = "([^"]+)"(?:, \.hint = "([^"]+)")?', src, re.M):
+    # the other rows: ROW(type, name, hint or NULL)
+    for m in re.finditer(r'^\s*ROW\(ROW_\w+,\s*"([^"]+)",\s*(?:"([^"]+)"|NULL)\)', src, re.M):
         if m.group(1) != "Back":
             out.append(("label", m.group(1)))
         if m.group(2):
             out.append(("hint", m.group(2)))
+    # the titles of the Headphones and Record columns (in the first heading's row)
+    out.append(("title_headphones", re.search(r'^#define TITLE_HEADPHONES\s+"([^"]+)"', src, re.M).group(1)))
+    out.append(("title_record", re.search(r'^#define TITLE_RECORD\s+"([^"]+)"', src, re.M).group(1)))
     for m in re.finditer(r'^#define HINT_\w+\s+"([^"]+)"', src, re.M):
         out.append(("hint", m.group(1)))
     # ripples' note of the test buttons: a key per line, each shown as a line of its own in ripples' font;
@@ -61,22 +62,23 @@ def page_strings():
     # a test that recorded nothing: its message and the two rows that hold the input
     busy = re.search(r'^#define HINT_TEST_BUSY\s+"([^"]+)"', src, re.M).group(1)
     out.append(("hint", ("{} ({}, {})", (busy, "Stream Audio", "HDMI Out Audio"))))
-    # ripples' Audio Source (its label and three buttons as one row) and test buttons
-    out.append(("source_row", ("{}|{}|{}|{}", ("Audio Source", "Mic", "Line In", "A/V In"))))
+    # ripples' test buttons
     out += [("test_button", b) for b in ("DVR", "Live", "Mic", "Line/AV")]
-    if '.name = "Back"' in src:
+    if 'ROW(ROW_BACK, "Back"' in src:
         out.append(("label", "< Back"))
     for m in re.finditer(r'^#define MARK_\w+\s+"([^"]+)"', src, re.M):
-        out.append(("value", m.group(1)))
+        out.append(("mark", m.group(1)))
     out += [("button", b) for b in ("Yes", "No", "On", "Off")]
-    out += [("value", "Off"), ("value", "Mix")] + [("value", v) for v in NUMBERS]
+    # an input's Record cell
+    out += [("record", b) for b in ("Yes", "No", "-")]
+    out += [("value", "Off")] + [("value", v) for v in NUMBERS]
     # "Off at this start: <reason>" (row_hint(), core/hdmi_audio.c's reasons)
     fault = re.search(r'^#define HINT_HDMI_FAULT\s+"([^"]+)"', src, re.M).group(1)
     out += [("hint", ("{}: {}", (fault, reason))) for reason in HDMI_FAULTS]
     return sorted(set(out), key=str)
 
 
-NUMBERS = ["+6.0 dB", "-4.5 dB", "10"]  # widest values, shown as they are in every language
+NUMBERS = ["+6.0 dB", "-4.5 dB", "10", "-"]  # widest values, shown as they are in every language
 # ripples' own strings that ripples 1.2.2's language files do not translate are translated here since
 # phase 4 (its nine labels and its note): none is left in English
 RIPPLES_UNTRANSLATED = set()

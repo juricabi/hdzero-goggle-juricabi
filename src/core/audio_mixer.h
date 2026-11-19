@@ -1,23 +1,24 @@
 #pragma once
 
 /*
- * Audio mixer for the V536 internal codec (all targets), juricabi: ripples' Audio page (Record
- * Audio, Audio Source, DVR Playback, Live Volume, Mic Gain, Line/AV Gain, the test buttons) with
- * the extras of all's mixer (docs/audio.md).
+ * Audio mixer for the V536 internal codec (all targets), juricabi (docs/audio.md).
  *
- * Every analog source has its own level in the analog output mixers, which feed the headphone /
- * line-out jack (left + right summed, mono). The ADC (recording, WiFi stream audio and HDMI-out
- * audio alike) takes that mix ("Record Headphone Mix": left and right separately, before the sum
- * and before the line-out volume) and/or each analog source straight from its input at full level
- * ("Record Mic / Line In / A/V In"; ripples' Audio Source is the preset that records one of them).
- * A source that is already in the recorded mix is not added a second time.
+ * Every input has two settings and nothing else changes them:
+ *  - its Headphones level: its level in the analog output mixers, which feed the headphone / line-out
+ *    jack (left + right summed, mono); 0 = not heard;
+ *  - its Record switch (Mic, Line In, A/V In): straight from its input into the ADC, heard or not.
+ *    The ADC is the recording, the WiFi stream audio and HDMI-out audio alike. HDMI-in audio (the
+ *    DAC) has no path into the ADC: heard only.
+ * Then the shared ones: Headphone Volume (the line out), Record Level (the ADC input gain), Mic Boost
+ * and Line In Boost (the preamps, for both paths).
  *
- * ripples' controls keep their keys and their meaning: Live Volume is the line-out volume (and,
- * when it is moved, sets the A/V In level by ripples' curve), Mic Gain the MIC1 preamp, Line/AV
- * Gain the MIC2 preamp and the ADC input gain (whenever more than the mic alone is recorded),
- * Audio Source the preset of the Record switches and of the built-in receiver's audio. DVR
- * playback and the page's test buttons run ripples' own codec code: the mixer is held meanwhile
- * (audio_mixer_hold()) and applies its state again afterwards.
+ * ripples' keys stay for ripples' values: [record] live_audio_volume (Headphone Volume), mic_gain (Mic
+ * Boost), linein_gain (Line In Boost), audio_source (kept as the first recorded input, for ripples'
+ * firmware). The Record switches, the levels and the Record Level are [mixer] keys. Before juricabi.2
+ * the page had ripples' Audio Source and Live Volume linked to them and a "Record Headphone Mix"; a
+ * setting.ini of then is taken over (audio_mixer_init()). DVR playback and the page's test buttons run
+ * ripples' own codec code: the mixer is held meanwhile (audio_mixer_hold()) and applies its state again
+ * afterwards.
  */
 
 #ifdef __cplusplus
@@ -34,19 +35,20 @@ typedef enum {
     AUDIO_MIXER_LINE_IN,        // headphone level
     AUDIO_MIXER_AV,             // headphone level
     AUDIO_MIXER_HDMI,           // headphone level of HDMI-in audio (the live digital source in the DAC)
-    AUDIO_MIXER_REC_MIX,        // Record Headphone Mix: the output mixers into the ADC, 0/1
-    AUDIO_MIXER_REC_MIC,        // Record Mic: the mic straight into the ADC (unless in the recorded mix), 0/1
+    AUDIO_MIXER_REC_MIC,        // Record Mic: the mic straight into the ADC, 0/1
     AUDIO_MIXER_REC_LINE_IN,    // Record Line In, 0/1
     AUDIO_MIXER_REC_AV,         // Record A/V In, 0/1
-    AUDIO_MIXER_RX_AUDIO,       // audio output of the built-in analog receiver (RTC6715), 0/1;
-                                // not a codec control (Goggle 2 and BoxPro only)
+    AUDIO_MIXER_RX_AUDIO,       // audio output of the built-in analog receiver (RTC6715), 0/1; not a codec
+                                // control (Goggle 2 and BoxPro only): follows A/V In (heard or recorded)
     AUDIO_MIXER_PHONES_AT_BOOT, // 0: as stock, the headphones get the mix from the first switch to an analog
                                 // source on; 1: from boot. Set by the first change of a headphone level.
+    AUDIO_MIXER_REC_LEVEL,      // Record Level 0..7: the ADC input gain, -4.5..+6 dB (3 = 0 dB)
     // [record] of setting.ini, ripples' keys (src/core/settings.c loads them into g_setting.record)
-    AUDIO_MIXER_LIVE_VOLUME,    // live_audio_volume 0..10: line-out volume (v * 31 + 5) / 10, 0 = off
-    AUDIO_MIXER_MIC_GAIN,       // mic_gain 0..7: MIC1 preamp
-    AUDIO_MIXER_LINEIN_GAIN,    // linein_gain 0..7: MIC2 preamp; ADC input gain unless only the mic is recorded
-    AUDIO_MIXER_SOURCE,         // audio_source 0..2 (Mic, Line In, A/V In): the preset, audio_mixer_set_source()
+    AUDIO_MIXER_LIVE_VOLUME,    // live_audio_volume 0..10: Headphone Volume, line out (v * 31 + 5) / 10, 0 = off
+    AUDIO_MIXER_MIC_GAIN,       // mic_gain 0..7: Mic Boost, the MIC1 preamp
+    AUDIO_MIXER_LINEIN_GAIN,    // linein_gain 0..7: Line In Boost, the MIC2 preamp
+    AUDIO_MIXER_SOURCE,         // audio_source 0..2 (Mic, Line In, A/V In): no row; the first recorded input,
+                                // for ripples' firmware (its Audio Source)
     AUDIO_MIXER_FIELD_COUNT
 } audio_mixer_field_t;
 
@@ -78,9 +80,10 @@ const char *audio_mixer_section(audio_mixer_field_t field);
 const char *audio_mixer_key(audio_mixer_field_t field);
 
 // Load the [mixer] settings, take over ripples' values, start the worker that writes them to the
-// codec. Without a [mixer] of version 2, the Record switches and the receiver's audio come from
-// [record] audio_source and the A/V In level from Live Volume (ripples' curve): the codec gets what
-// ripples' firmware set. A [mixer] written by this firmware also holds the [record] audio_source and
+// codec. Without a [mixer] of version 2, the Record switches, the Record Level and the receiver's audio
+// come from [record] audio_source (and linein_gain) and the A/V In level from Live Volume (ripples'
+// curve): the codec gets what ripples' firmware set. A [mixer] of juricabi.1 with rec_mix=1 (Record
+// Headphone Mix) records each input it heard directly instead; rec_mix goes with the next save. A [mixer] written by this firmware also holds the [record] audio_source and
 // live_audio_volume its values belong to (record_source, record_live): when stock ripples changed
 // one of them since, the Record switches and the receiver's audio (or the A/V In level) follow the
 // new one again, as the Audio Source (or Live Volume) row would have set them. A setting.ini of all's
@@ -94,15 +97,10 @@ int audio_mixer_max(audio_mixer_field_t field);
 // Clamp and store one value (memory only): audio_mixer_apply() sends it to the codec,
 // audio_mixer_save() writes it to setting.ini. Changing a headphone level of a source (Mic, Line In,
 // A/V In, HDMI In) also makes the headphones live from every boot (AUDIO_MIXER_PHONES_AT_BOOT), and
-// now, unless a source has muted the line out (HDMI in). (Not Live Volume: ripples' slider never
-// switched the line out on.)
+// now, unless a source has muted the line out (HDMI in). (Not Headphone Volume: ripples' slider never
+// switched the line out on.) Book-keeping that is not a setting of the page follows: ripples' Audio
+// Source (the first recorded input) and the built-in receiver's audio (A/V In heard or recorded).
 void audio_mixer_set(audio_mixer_field_t field, int value);
-// ripples' Live Volume slider: the line-out volume and the A/V In level by ripples' curve
-// (LINEIN gain (v^3 * 7 + 500) / 1000, at least -3 dB above 0)
-void audio_mixer_set_live_volume(int value);
-// ripples' Audio Source: record this source directly, not the other two; the built-in receiver's
-// audio on with A/V In only (ripples: rtc6715.init(1, audio_source == A/V In))
-void audio_mixer_set_source(int source);
 // Write the values changed since the last save to setting.ini (nothing without a change). Call it
 // from the UI, which writes the other settings (under lvgl_mutex), never from the worker. With a
 // change, values that only follow stock ripples' newer [record] values (audio_mixer_init()) are
@@ -147,12 +145,12 @@ bool audio_mixer_is_reset_control(const char *name);
 // Line out allowed (an analog source) or muted (HDMI in), as ripples' dvr_enable_line_out(). At
 // boot it is muted until the first call with true, like ripples' firmware that left the record
 // daemon's (silent) mixer in place until then, unless AUDIO_MIXER_PHONES_AT_BOOT is set. While it
-// is off, only what Record Headphone Mix records stays in the output mixers.
+// is off, nothing stays in the output mixers.
 void audio_mixer_set_line_out(bool enable);
 // HDMI-in audio (src/core/hdmi_audio.c, only with [hdmi] audio_in=1): a live digital source plays
-// into the DAC. Its level is AUDIO_MIXER_HDMI; it is mixed with the other live sources, the line
-// out is on even while HDMI in is the source (Live Volume permitting), and Record Headphone Mix
-// records it (there is no direct path from the DAC into the ADC).
+// into the DAC. Its level is AUDIO_MIXER_HDMI; it is mixed with the other live sources and the line
+// out is on even while HDMI in is the source (Headphone Volume permitting). It is not recorded: there
+// is no path from the DAC into the ADC but through the output mixers, which the mixer no longer records.
 void audio_mixer_set_live_dac(bool on);
 
 // Audio output of the built-in analog receiver: the audio_on of every rtc6715.init(1, ...)
@@ -162,19 +160,15 @@ bool audio_mixer_rx_audio(void);
 // Human readable value of a field ("Off", "-4.5 dB", "7", ...)
 void audio_mixer_value_str(audio_mixer_field_t field, int value, char *buf, size_t size);
 
-// The headphone level field of a Record source switch (AUDIO_MIXER_REC_MIC -> AUDIO_MIXER_MIC, ...),
+// The headphone level field of a Record switch (AUDIO_MIXER_REC_MIC -> AUDIO_MIXER_MIC, ...),
 // AUDIO_MIXER_FIELD_COUNT for other fields.
 audio_mixer_field_t audio_mixer_level_of(audio_mixer_field_t rec_field);
-// Is that source (a Record source switch field) recorded through the headphone mix (Record Headphone
-// Mix on and its level above 0)? Then its direct path stays off: it would be recorded twice.
-bool audio_mixer_in_recorded_mix(const audio_mixer_settings_t *settings, audio_mixer_field_t rec_field);
-// The same for the current settings.
-bool audio_mixer_recorded_via_mix(audio_mixer_field_t rec_field);
-// Does the current state record exactly the Audio Source preset (its source directly, nothing else
-// directly)? The page marks the Audio Source row otherwise.
-bool audio_mixer_is_preset(void);
+// ripples' Audio Source for these Record switches: the current one while it is recorded, otherwise the
+// first recorded input (Mic, Line In, A/V In), the current one when none is.
+int audio_mixer_source_of(const audio_mixer_settings_t *settings);
 
 // ripples' curves (dvr.c had them): line-out volume of Live Volume, A/V In level of Live Volume
+// (ripples' state of a setting.ini without [mixer], audio_mixer_defaults())
 int audio_mixer_live_line_out(int live_volume);
 int audio_mixer_live_av_level(int live_volume);
 

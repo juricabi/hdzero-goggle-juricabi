@@ -11,16 +11,18 @@
  *   LINEIN (A/V)        ------------> L/R output mixer (LINEIN gain)    / ADC input mixer
  *   DAC (HDMI-in audio) ------------> L/R output mixer
  *   L/R output mixer -> LINEOUT (L+R sum) -> lineout volume -> headphone jack
- *                    -> ADC input mixer ("l_output/r_output mixer" switches: left ADC <- left
- *                       output mixer, right <- right; before the sum and the line-out volume)
- *   ADC input mixer -> ADC input gain -> ADC -> AIF1 -> record daemon (48 kHz stereo AAC)
- * The ADC input mixers are plain DAPM mixers (one bit per input in L/R_ADCMIX_SRC, summed), so
- * the output mixer and the direct inputs can be on together (docs/audio.md).
+ *   ADC input mixer (MIC1 / MIC2 / LINEIN switches, summed) -> ADC input gain -> ADC -> ADC volume
+ *                   -> AIF1 -> record daemon (48 kHz stereo AAC): the DVR, the WiFi stream, HDMI out
+ * (The output mixers into the ADC, "Record Headphone Mix" before juricabi.2, are always off.)
  *
- * juricabi: the line-out volume is ripples' Live Volume, the preamps ripples' Mic Gain and
- * Line/AV Gain, the ADC input gain ripples' Line/AV Gain unless only the mic is recorded (ripples
- * set it with Line In / A/V In as the Audio Source only, the mic recorded at the record daemon's
- * 0 dB). DVR playback is not routed here: ripples' playback code runs while the mixer is held.
+ * juricabi.2: every input has a headphone level and (but HDMI In) a Record switch, nothing else
+ * changes them. The line-out volume is Headphone Volume (ripples' Live Volume key), the preamps Mic
+ * Boost and Line In Boost (ripples' Mic Gain / Line/AV Gain keys), the ADC input gain Record Level.
+ * The ADC always keeps a source: without one the codec's DAPM powers it down while the record daemon
+ * captures, and a recording's stop then waited for the capture's timeout (about 2 s on the goggle, the
+ * yellow "waiting for recorder" status of every menu press). With nothing to record the mic stays
+ * connected and the digital ADC volume is at its minimum (-119 dB). DVR playback is not routed here:
+ * ripples' playback code runs while the mixer is held.
  */
 
 #include <stdio.h>
@@ -32,18 +34,19 @@
 // old firmware recorded with (docs/audio.md).
 #define DIGITAL_VOLUME_OLD 160
 #define DAC_PLAYBACK       152 // 8 steps (6 dB) less: line out sums the left and right output mixers
+#define ADC_VOLUME_SILENT  0   // 'ADC volume' minimum: -119.25 dB (the dump's dBscale-min)
 
 static const uint8_t field_max[AUDIO_MIXER_FIELD_COUNT] = {
     [AUDIO_MIXER_MIC] = AUDIO_MIXER_LEVEL_MAX,
     [AUDIO_MIXER_LINE_IN] = AUDIO_MIXER_LEVEL_MAX,
     [AUDIO_MIXER_AV] = AUDIO_MIXER_LEVEL_MAX,
     [AUDIO_MIXER_HDMI] = AUDIO_MIXER_LEVEL_MAX,
-    [AUDIO_MIXER_REC_MIX] = 1,
     [AUDIO_MIXER_REC_MIC] = 1,
     [AUDIO_MIXER_REC_LINE_IN] = 1,
     [AUDIO_MIXER_REC_AV] = 1,
     [AUDIO_MIXER_RX_AUDIO] = 1,
     [AUDIO_MIXER_PHONES_AT_BOOT] = 1,
+    [AUDIO_MIXER_REC_LEVEL] = AUDIO_MIXER_GAIN_MAX,
     [AUDIO_MIXER_LIVE_VOLUME] = AUDIO_MIXER_LIVE_VOLUME_MAX,
     [AUDIO_MIXER_MIC_GAIN] = AUDIO_MIXER_GAIN_MAX,
     [AUDIO_MIXER_LINEIN_GAIN] = AUDIO_MIXER_GAIN_MAX,
@@ -96,9 +99,7 @@ void audio_mixer_defaults(audio_mixer_settings_t *settings, const audio_mixer_re
     // HDMI-in audio (only with HDMI In Audio on): 0 dB, the level of DVR playback.
     v[AUDIO_MIXER_HDMI] = OUTPUT_GAIN_0DB + 1;
 
-    // Recording: exactly the one source of the Audio Source setting, straight into the ADC; the
-    // headphone mix is not recorded.
-    v[AUDIO_MIXER_REC_MIX] = 0;
+    // Recording: exactly the one source of the Audio Source setting, straight into the ADC.
     v[AUDIO_MIXER_REC_MIC] = dvr_source == 0;
     v[AUDIO_MIXER_REC_LINE_IN] = dvr_source == 1;
     v[AUDIO_MIXER_REC_AV] = dvr_source == 2;
@@ -110,6 +111,10 @@ void audio_mixer_defaults(audio_mixer_settings_t *settings, const audio_mixer_re
     // into HDZero (or HDMI in) left the headphones silent until then. Kept until a headphone level
     // of a source is changed on the Audio page.
     v[AUDIO_MIXER_PHONES_AT_BOOT] = 0;
+
+    // Record Level: ripples set the ADC input gain to Line/AV Gain with Line In / A/V In as the Audio
+    // Source; with the mic the record daemon's 0 dB stayed.
+    v[AUDIO_MIXER_REC_LEVEL] = dvr_source == 0 ? OUTPUT_GAIN_0DB : clamp(rec->linein_gain, AUDIO_MIXER_GAIN_MAX);
 
     v[AUDIO_MIXER_LIVE_VOLUME] = clamp(rec->live_volume, AUDIO_MIXER_LIVE_VOLUME_MAX);
     v[AUDIO_MIXER_MIC_GAIN] = clamp(rec->mic_gain, AUDIO_MIXER_GAIN_MAX);
@@ -130,9 +135,15 @@ audio_mixer_field_t audio_mixer_level_of(audio_mixer_field_t rec_field) {
     }
 }
 
-bool audio_mixer_in_recorded_mix(const audio_mixer_settings_t *settings, audio_mixer_field_t rec_field) {
-    const audio_mixer_field_t level = audio_mixer_level_of(rec_field);
-    return level < AUDIO_MIXER_FIELD_COUNT && settings->value[AUDIO_MIXER_REC_MIX] && settings->value[level] > 0;
+int audio_mixer_source_of(const audio_mixer_settings_t *settings) {
+    static const audio_mixer_field_t rec[] = {AUDIO_MIXER_REC_MIC, AUDIO_MIXER_REC_LINE_IN, AUDIO_MIXER_REC_AV};
+    const int current = clamp(settings->value[AUDIO_MIXER_SOURCE], 2);
+    if (settings->value[rec[current]])
+        return current;
+    for (int i = 0; i < 3; i++)
+        if (settings->value[rec[i]])
+            return i;
+    return current;
 }
 
 typedef struct {
@@ -181,45 +192,45 @@ size_t audio_mixer_build_commands(const audio_mixer_settings_t *settings, const 
     for (int i = 0; i < AUDIO_MIXER_FIELD_COUNT; i++)
         v[i] = clamp(settings->value[i], field_max[i]);
 
-    // Record Headphone Mix: the output mixers into the ADC
-    const bool rec_mix = v[AUDIO_MIXER_REC_MIX] != 0;
-
     // Sources in the output mixer at their levels
     const int mon_mic = v[AUDIO_MIXER_MIC];
     const int mon_line = v[AUDIO_MIXER_LINE_IN];
     const int mon_av = v[AUDIO_MIXER_AV];
 
-    // The DAC as a live source (HDMI-in audio), mixed with the others at its own level. It reaches
-    // the ADC only through the output mixers (Record Headphone Mix); the AIF1 DA -> AD loopbacks are
-    // never set. (DVR playback is ripples' code, while the mixer is held.)
+    // The DAC as a live source (HDMI-in audio), mixed with the others at its own level. Heard only:
+    // the output mixers are not recorded, and the AIF1 DA -> AD loopbacks are never set. (DVR playback
+    // is ripples' code, while the mixer is held.)
     const bool live_dac = context->live_dac;
     const int mon_dac = live_dac ? v[AUDIO_MIXER_HDMI] : 0;
     const int dac_on = mon_dac > 0;
     // live level 1..8 = -4.5..+6 dB around the playback level, in 2 steps of 0.75 dB
     const int dac_volume = mon_dac ? DAC_PLAYBACK + 2 * (mon_dac - 1 - OUTPUT_GAIN_0DB) : DIGITAL_VOLUME_OLD;
 
-    // Sources straight into the ADC at full level (Record Mic / Line In / A/V In), heard or not.
-    // A source that is already in the recorded mix stays out: it would be recorded twice.
-    const int adc_mic = v[AUDIO_MIXER_REC_MIC] && !(rec_mix && mon_mic > 0);
-    const int adc_line = v[AUDIO_MIXER_REC_LINE_IN] && !(rec_mix && mon_line > 0);
-    const int adc_av = v[AUDIO_MIXER_REC_AV] && !(rec_mix && mon_av > 0);
+    // Sources straight into the ADC (Record Mic / Line In / A/V In), heard or not.
+    const int rec_mic = v[AUDIO_MIXER_REC_MIC] != 0;
+    const int adc_line = v[AUDIO_MIXER_REC_LINE_IN] != 0;
+    const int adc_av = v[AUDIO_MIXER_REC_AV] != 0;
+    // Nothing to record: the mic stays connected (the ADC keeps a source, see above), silenced by the
+    // digital ADC volume
+    const bool silent = !rec_mic && !adc_line && !adc_av;
+    const int adc_mic = rec_mic || silent;
+    const int adc_volume = silent ? ADC_VOLUME_SILENT : DIGITAL_VOLUME_OLD;
 
-    // ADC input gain: ripples' Line/AV Gain, which ripples set with Line In / A/V In as the Audio
-    // Source; with the mic alone the record daemon's 0 dB stayed
-    const int adc_gain = (rec_mix || adc_line || adc_av) ? v[AUDIO_MIXER_LINEIN_GAIN] : OUTPUT_GAIN_0DB;
+    // ADC input gain: Record Level
+    const int adc_gain = v[AUDIO_MIXER_REC_LEVEL];
 
     // Line out volume (ripples' Live Volume); 0 switches the line out off
     const int volume = audio_mixer_live_line_out(v[AUDIO_MIXER_LIVE_VOLUME]);
     // (HDMI in mutes the line out, unless its audio is played: live_dac)
     const int line_out = (context->line_out || live_dac) && volume > 0;
 
-    // What is connected to the output mixers. While the line out is off (HDMI in, Live Volume 0, or
-    // the stock boot state: silent until the first switch to an analog source) only what the
-    // recording of the mix needs: the record daemon's AW_MPI_SYS_Init() (SD check, card insertion,
-    // SD repair / format) switches the line out on at volume 27 behind the mixer's back until the
-    // watcher undoes it, and must then find nothing to play but the idle DAC, as on a stock goggle.
-    // (The levels of the sources are kept: they are connected again with the line out.)
-    const bool connect = line_out || rec_mix;
+    // What is connected to the output mixers. While the line out is off (HDMI in, Headphone Volume 0,
+    // or the stock boot state: silent until the first switch to an analog source) nothing: the record
+    // daemon's AW_MPI_SYS_Init() (SD check, card insertion, SD repair / format) switches the line out
+    // on at volume 27 behind the mixer's back until the watcher undoes it, and must then find nothing
+    // to play but the idle DAC, as on a stock goggle. (The levels of the sources are kept: they are
+    // connected again with the line out.)
+    const bool connect = line_out;
     const int out_mic = connect ? mon_mic : 0;
     const int out_line = connect ? mon_line : 0;
     const int out_av = connect ? mon_av : 0;
@@ -235,7 +246,7 @@ size_t audio_mixer_build_commands(const audio_mixer_settings_t *settings, const 
         const char *name;
         int on;
     } sw[] = {
-        // output mixers: headphone mix, and the recording with Record Headphone Mix
+        // output mixers: the headphone mix
         {"Left Output Mixer MIC1Booststage Switch", out_mic > 0},
         {"Right Output Mixer MIC1Booststage Switch", out_mic > 0},
         {"Left Output Mixer MIC2Booststage Switch", out_line > 0},
@@ -255,8 +266,8 @@ size_t audio_mixer_build_commands(const audio_mixer_settings_t *settings, const 
         {"RADC input Mixer MIC2 boost Switch", adc_line},
         {"LADC input Mixer LINEINL Switch", adc_av},
         {"RADC input Mixer LINEINR Switch", adc_av},
-        {"LADC input Mixer l_output mixer Switch", rec_mix},
-        {"RADC input Mixer r_output mixer Switch", rec_mix},
+        {"LADC input Mixer l_output mixer Switch", 0},
+        {"RADC input Mixer r_output mixer Switch", 0},
         {"LADC input Mixer r_output mixer Switch", 0},
         {"RADC input Mixer l_output mixer Switch", 0},
         {"AIF1 AD0L Mixer ADCL Switch", 1},
@@ -278,7 +289,7 @@ size_t audio_mixer_build_commands(const audio_mixer_settings_t *settings, const 
     if (out_av)
         cset(&cb, "LINEINL/R to L_R output mixer gain", out_av - 1);
     cset(&cb, "ADC input gain control", adc_gain);
-    cset(&cb, "ADC volume", DIGITAL_VOLUME_OLD);
+    cset(&cb, "ADC volume", adc_volume);
     cset(&cb, "DAC volume", dac_volume);
     // the digital volume of both AIF1 DAC timeslots: ripples' DVR Playback sets them for a file or a
     // test (dvr_set_dvr_audio_volume(), the test's timeslot 1 at 0); HDMI-in audio plays through

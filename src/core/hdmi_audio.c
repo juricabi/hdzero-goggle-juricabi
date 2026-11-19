@@ -79,7 +79,7 @@ static int hdmi_audio_send(long cmd) {
  * (src/core/audio_mixer.c), which alone writes the codec's controls. On: the bridge plays I2S2
  * into the codec DAC, and the mixer takes the DAC in as a live source at the HDMI In level of the
  * Audio page, next to the analog sources at theirs; the line out stays on although HDMI in is the
- * source (Live Volume permitting); Record Headphone Mix records it with the rest of the headphone mix.
+ * source (Headphone Volume permitting). It is heard only: nothing records the DAC (juricabi.2).
  * Off: the stock state of HDMI in (line out off), the DAC out of the mix. Off waits until the codec
  * has it, so the DAC leaves the mix before the bridge stops playing into it. */
 static void hdmi_audio_line_out(bool hdmi_in_audio) {

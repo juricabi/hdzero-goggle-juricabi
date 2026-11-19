@@ -72,12 +72,12 @@ static const struct {
     [AUDIO_MIXER_LINE_IN] = {AUDIO_MIXER_SECTION, "line_in"},
     [AUDIO_MIXER_AV] = {AUDIO_MIXER_SECTION, "av"},
     [AUDIO_MIXER_HDMI] = {AUDIO_MIXER_SECTION, "hdmi"},
-    [AUDIO_MIXER_REC_MIX] = {AUDIO_MIXER_SECTION, "rec_mix"},
     [AUDIO_MIXER_REC_MIC] = {AUDIO_MIXER_SECTION, "rec_mic"},
     [AUDIO_MIXER_REC_LINE_IN] = {AUDIO_MIXER_SECTION, "rec_line_in"},
     [AUDIO_MIXER_REC_AV] = {AUDIO_MIXER_SECTION, "rec_av"},
     [AUDIO_MIXER_RX_AUDIO] = {AUDIO_MIXER_SECTION, "rx_audio"},
     [AUDIO_MIXER_PHONES_AT_BOOT] = {AUDIO_MIXER_SECTION, "phones_at_boot"},
+    [AUDIO_MIXER_REC_LEVEL] = {AUDIO_MIXER_SECTION, "rec_level"},
     [AUDIO_MIXER_LIVE_VOLUME] = {RECORD_SECTION, "live_audio_volume"},
     [AUDIO_MIXER_MIC_GAIN] = {RECORD_SECTION, "mic_gain"},
     [AUDIO_MIXER_LINEIN_GAIN] = {RECORD_SECTION, "linein_gain"},
@@ -115,6 +115,8 @@ static bool section_written; // setting.ini has a [mixer] of this version (UI th
 static long file_source, file_live, file_basis_source, file_basis_live;
 static unsigned stale; // fields that follow stock ripples' newer [record] values: written with the next change
 static unsigned in_file; // [mixer] fields setting.ini has (the others follow [record] at every start)
+// juricabi.1's Record Headphone Mix (rec_mix) is in setting.ini: removed with the next save (UI thread)
+static bool retire_rec_mix;
 static unsigned codec_reads; // controls read by the watcher (host test: the cost of a pass)
 
 static void start_worker(void);
@@ -192,12 +194,30 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
                 in_file |= FIELD_BIT(i);
             mixer.value[i] = clamp_field(i, ini_getl(AUDIO_MIXER_SECTION, field_ini[i].key, defaults.value[i], SETTING_INI));
         }
+        // juricabi.1's Record Headphone Mix (rec_mix=1) recorded what was heard: each input heard then is
+        // recorded directly now. Its Record Level was Line/AV Gain whenever more than the mic alone was
+        // recorded, else 0 dB. rec_mix goes with the next save.
+        const long rec_mix = ini_getl(AUDIO_MIXER_SECTION, "rec_mix", NO_KEY, SETTING_INI);
+        retire_rec_mix = rec_mix != NO_KEY;
+        if (!(in_file & FIELD_BIT(AUDIO_MIXER_REC_LEVEL))) {
+            const bool more_than_mic = rec_mix > 0 || mixer.value[AUDIO_MIXER_REC_LINE_IN] || mixer.value[AUDIO_MIXER_REC_AV];
+            mixer.value[AUDIO_MIXER_REC_LEVEL] = more_than_mic ? clamp_field(AUDIO_MIXER_REC_LEVEL, rec->linein_gain) : 3;
+        }
+        if (rec_mix > 0) {
+            for (audio_mixer_field_t f = AUDIO_MIXER_REC_MIC; f <= AUDIO_MIXER_REC_AV; f++) {
+                if (mixer.value[audio_mixer_level_of(f)] > 0 && !mixer.value[f]) {
+                    mixer.value[f] = 1;
+                    stale |= FIELD_BIT(f);
+                }
+            }
+            LOGI("audio mixer: Record Headphone Mix of juricabi.1: the inputs it heard are recorded directly");
+        }
         // Stock ripples changed its Audio Source (Live Volume) since this firmware wrote [mixer]: the
-        // Record switches and the receiver's audio (the A/V In level) as that row sets them, from the
-        // new value; written with the next change on the page
+        // Record switches, the Record Level and the receiver's audio (the A/V In level) as that row sets
+        // them, from the new value; written with the next change on the page
         if (file_basis_source != NO_KEY && file_basis_source != rec->audio_source) {
             static const audio_mixer_field_t preset[] = {AUDIO_MIXER_REC_MIC, AUDIO_MIXER_REC_LINE_IN, AUDIO_MIXER_REC_AV,
-                                                         AUDIO_MIXER_RX_AUDIO};
+                                                         AUDIO_MIXER_RX_AUDIO, AUDIO_MIXER_REC_LEVEL};
             for (size_t i = 0; i < sizeof(preset) / sizeof(preset[0]); i++) {
                 mixer.value[preset[i]] = defaults.value[preset[i]];
                 stale |= FIELD_BIT(preset[i]);
@@ -218,17 +238,15 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
         }
         if (!has_key(RECORD_SECTION, "mic_gain") && has_key(AUDIO_MIXER_SECTION, "mic_boost"))
             mixer.value[AUDIO_MIXER_MIC_GAIN] = clamp_field(AUDIO_MIXER_MIC_GAIN, ini_getl(AUDIO_MIXER_SECTION, "mic_boost", 4, SETTING_INI));
-        if (!has_key(RECORD_SECTION, "linein_gain") && has_key(AUDIO_MIXER_SECTION, "dvr_level"))
-            mixer.value[AUDIO_MIXER_LINEIN_GAIN] = clamp_field(AUDIO_MIXER_LINEIN_GAIN, ini_getl(AUDIO_MIXER_SECTION, "dvr_level", 3, SETTING_INI));
+        if (!has_key(RECORD_SECTION, "linein_gain") && has_key(AUDIO_MIXER_SECTION, "line_in_boost"))
+            mixer.value[AUDIO_MIXER_LINEIN_GAIN] = clamp_field(AUDIO_MIXER_LINEIN_GAIN, ini_getl(AUDIO_MIXER_SECTION, "line_in_boost", 4, SETTING_INI));
+        if (!(in_file & FIELD_BIT(AUDIO_MIXER_REC_LEVEL)) && has_key(AUDIO_MIXER_SECTION, "dvr_level"))
+            mixer.value[AUDIO_MIXER_REC_LEVEL] = clamp_field(AUDIO_MIXER_REC_LEVEL, ini_getl(AUDIO_MIXER_SECTION, "dvr_level", 3, SETTING_INI));
         if (!has_key(RECORD_SECTION, "dvr_audio_volume_v2") && !has_key(RECORD_SECTION, "dvr_audio_volume") &&
             !has_key(RECORD_SECTION, "audio_volume") && has_key(AUDIO_MIXER_SECTION, "playback"))
             rec->dvr_volume = dvr_volume_of_playback(ini_getl(AUDIO_MIXER_SECTION, "playback", 27, SETTING_INI));
-        // the Audio Source row shows the one source recorded directly, if there is one (all's firmware
-        // left [record] audio_source as it was before its Record switches)
-        // (one of this firmware: [record] audio_source is the row's own value, as written)
-        const int direct = mixer.value[AUDIO_MIXER_REC_MIC] + mixer.value[AUDIO_MIXER_REC_LINE_IN] + mixer.value[AUDIO_MIXER_REC_AV];
-        if (direct == 1 && file_basis_source == NO_KEY)
-            mixer.value[AUDIO_MIXER_SOURCE] = mixer.value[AUDIO_MIXER_REC_MIC] ? 0 : (mixer.value[AUDIO_MIXER_REC_LINE_IN] ? 1 : 2);
+        // ripples' Audio Source: the first recorded input (written with the next change)
+        mixer.value[AUDIO_MIXER_SOURCE] = audio_mixer_source_of(&mixer);
         LOGI("audio mixer: [mixer] version %ld, record/audio_source=%d", version, rec->audio_source);
     }
     // what setting.ini has (or stands for): written when changed. (A [record] value taken over from
@@ -244,6 +262,15 @@ void audio_mixer_init(audio_mixer_record_t *rec) {
     pthread_mutex_unlock(&mixer_mutex);
 
     start_worker();
+}
+
+// What follows the settings of the page (mixer_mutex held): ripples' Audio Source (the first recorded
+// input) and the built-in receiver's audio (on while A/V In is heard or recorded).
+static void follow_locked(audio_mixer_field_t field) {
+    if (field == AUDIO_MIXER_REC_MIC || field == AUDIO_MIXER_REC_LINE_IN || field == AUDIO_MIXER_REC_AV)
+        mixer.value[AUDIO_MIXER_SOURCE] = audio_mixer_source_of(&mixer);
+    if (field == AUDIO_MIXER_AV || field == AUDIO_MIXER_REC_AV)
+        mixer.value[AUDIO_MIXER_RX_AUDIO] = mixer.value[AUDIO_MIXER_AV] > 0 || mixer.value[AUDIO_MIXER_REC_AV];
 }
 
 static bool is_headphone_level(audio_mixer_field_t field) {
@@ -270,6 +297,8 @@ static void set_locked(audio_mixer_field_t field, int value) {
         if (!line_out_by_source)
             context.line_out = true;
     }
+    if (mixer.value[field] != old)
+        follow_locked(field);
 }
 
 void audio_mixer_set(audio_mixer_field_t field, int value) {
@@ -278,34 +307,6 @@ void audio_mixer_set(audio_mixer_field_t field, int value) {
     pthread_mutex_lock(&mixer_mutex);
     set_locked(field, value);
     pthread_mutex_unlock(&mixer_mutex);
-}
-
-void audio_mixer_set_live_volume(int value) {
-    pthread_mutex_lock(&mixer_mutex);
-    // ripples' slider: the line-out volume and the A/V level together, and never the line out on
-    mixer.value[AUDIO_MIXER_LIVE_VOLUME] = clamp_field(AUDIO_MIXER_LIVE_VOLUME, value);
-    mixer.value[AUDIO_MIXER_AV] = audio_mixer_live_av_level(mixer.value[AUDIO_MIXER_LIVE_VOLUME]);
-    pthread_mutex_unlock(&mixer_mutex);
-}
-
-void audio_mixer_set_source(int source) {
-    pthread_mutex_lock(&mixer_mutex);
-    const int s = clamp_field(AUDIO_MIXER_SOURCE, source);
-    mixer.value[AUDIO_MIXER_SOURCE] = s;
-    mixer.value[AUDIO_MIXER_REC_MIC] = s == 0;
-    mixer.value[AUDIO_MIXER_REC_LINE_IN] = s == 1;
-    mixer.value[AUDIO_MIXER_REC_AV] = s == 2;
-    mixer.value[AUDIO_MIXER_RX_AUDIO] = s == 2;
-    pthread_mutex_unlock(&mixer_mutex);
-}
-
-bool audio_mixer_is_preset(void) {
-    pthread_mutex_lock(&mixer_mutex);
-    const int s = mixer.value[AUDIO_MIXER_SOURCE];
-    const bool preset = mixer.value[AUDIO_MIXER_REC_MIC] == (s == 0) && mixer.value[AUDIO_MIXER_REC_LINE_IN] == (s == 1) &&
-                        mixer.value[AUDIO_MIXER_REC_AV] == (s == 2);
-    pthread_mutex_unlock(&mixer_mutex);
-    return preset;
 }
 
 void audio_mixer_save(void) {
@@ -369,6 +370,11 @@ void audio_mixer_save(void) {
             wrote_mixer = true;
         }
     }
+    // juricabi.1's rec_mix: what it recorded is in the Record switches now
+    if (retire_rec_mix) {
+        ini_puts(AUDIO_MIXER_SECTION, "rec_mix", NULL, SETTING_INI);
+        retire_rec_mix = false;
+    }
     // the first change in [mixer]: the version last, so that a section cut short by a power loss is
     // read as none (from ripples' state again); the fields not written keep coming from there
     if (wrote_mixer && !section_written) {
@@ -417,11 +423,12 @@ static bool write_batch(const audio_mixer_settings_t *settings, const audio_mixe
 
     const size_t len = audio_mixer_build_commands(settings, ctx, cmd, sizeof(cmd));
     const uint8_t *v = settings->value;
-    LOGI("audio mixer: mic=%d line_in=%d av=%d hdmi=%d live=%d gains=%d/%d rec mix=%d direct=%d%d%d source=%d rx=%d line_out=%d live_dac=%d",
-         v[AUDIO_MIXER_MIC], v[AUDIO_MIXER_LINE_IN], v[AUDIO_MIXER_AV], v[AUDIO_MIXER_HDMI],
-         v[AUDIO_MIXER_LIVE_VOLUME], v[AUDIO_MIXER_MIC_GAIN], v[AUDIO_MIXER_LINEIN_GAIN],
-         v[AUDIO_MIXER_REC_MIX], v[AUDIO_MIXER_REC_MIC], v[AUDIO_MIXER_REC_LINE_IN], v[AUDIO_MIXER_REC_AV],
-         v[AUDIO_MIXER_SOURCE], v[AUDIO_MIXER_RX_AUDIO], ctx->line_out, ctx->live_dac);
+    LOGI("audio mixer: heard mic=%d line_in=%d av=%d hdmi=%d volume=%d, recorded mic=%d line_in=%d av=%d at %d, boosts=%d/%d, "
+         "source=%d rx=%d line_out=%d live_dac=%d",
+         v[AUDIO_MIXER_MIC], v[AUDIO_MIXER_LINE_IN], v[AUDIO_MIXER_AV], v[AUDIO_MIXER_HDMI], v[AUDIO_MIXER_LIVE_VOLUME],
+         v[AUDIO_MIXER_REC_MIC], v[AUDIO_MIXER_REC_LINE_IN], v[AUDIO_MIXER_REC_AV], v[AUDIO_MIXER_REC_LEVEL],
+         v[AUDIO_MIXER_MIC_GAIN], v[AUDIO_MIXER_LINEIN_GAIN], v[AUDIO_MIXER_SOURCE], v[AUDIO_MIXER_RX_AUDIO],
+         ctx->line_out, ctx->live_dac);
 
     // what the codec should have from now on, whatever happens below: the watcher compares the
     // codec with it, and applies again (with a backoff) when amixer did not get it there
@@ -745,13 +752,6 @@ bool audio_mixer_rx_audio(void) {
     return audio_mixer_get(AUDIO_MIXER_RX_AUDIO) != 0;
 }
 
-bool audio_mixer_recorded_via_mix(audio_mixer_field_t rec_field) {
-    pthread_mutex_lock(&mixer_mutex);
-    const bool in_mix = audio_mixer_in_recorded_mix(&mixer, rec_field);
-    pthread_mutex_unlock(&mixer_mutex);
-    return in_mix;
-}
-
 static void db_str(int tenths, char *buf, size_t size) {
     const int abs_tenths = tenths < 0 ? -tenths : tenths;
     snprintf(buf, size, "%s%d.%d dB", tenths < 0 ? "-" : (tenths > 0 ? "+" : ""), abs_tenths / 10, abs_tenths % 10);
@@ -768,6 +768,16 @@ void audio_mixer_value_str(audio_mixer_field_t field, int value, char *buf, size
             snprintf(buf, size, "%s", _lang("Off"));
         else
             db_str(-45 + 15 * (value - 1), buf, size);
+        break;
+    case AUDIO_MIXER_REC_LEVEL:
+        // the ADC input gain register 0..7: -4.5 dB .. +6 dB in 1.5 dB steps
+        db_str(-45 + 15 * value, buf, size);
+        break;
+    case AUDIO_MIXER_LIVE_VOLUME:
+        if (value <= 0)
+            snprintf(buf, size, "%s", _lang("Off")); // (the line out off)
+        else
+            snprintf(buf, size, "%d", value);
         break;
     default:
         // ripples' sliders show their steps (Live Volume, Mic Gain, Line/AV Gain)

@@ -1,8 +1,9 @@
 /*
  * Measures the strings of the Audio page, the Module Bay page and the new WiFi rows with the
  * firmware's LVGL fonts (check_strings.py builds it once per target with conf/ui.h). Input, one
- * per line: "<kind>\t<lang>\t<text>", kind one of label, button, source_row (label|b|b|b), test_button,
- * value, heading, hint, note (Audio page), mb_label, mb_text, mb_status, mb_option, mb_note (Module Bay page, goggles only),
+ * per line: "<kind>\t<lang>\t<text>", kind one of label, button, test_button, value, record, mark,
+ * heading, title_headphones, title_record, hint, note (Audio page), mb_label, mb_text, mb_status,
+ * mb_option, mb_note (Module Bay page, goggles only),
  * wifi_label, wifi_note (WiFi page). Output, one per line:
  *   "OK|WIDE|GLYPH <kind> <lang> <width>/<room> px <text>"
  * WIDE: wider than its column, GLYPH: a character the font does not have (shown as a box or
@@ -17,12 +18,10 @@
 
 #include "../../conf/ui.h"
 
-#define ROW_W (UI_AUDIO_COL_LABEL + 2 * UI_AUDIO_COL_BUTTON + UI_AUDIO_COL_SPACER + UI_AUDIO_COL_VALUE)
-// ripples' Audio Source and test buttons across the button columns, the spacer and the value (page_audio.c)
-#define AUDIO_TEST_AREA_W (2 * UI_AUDIO_COL_BUTTON + UI_AUDIO_COL_SPACER + UI_AUDIO_COL_VALUE)
+#define ROW_W (UI_AUDIO_COL_LABEL + UI_AUDIO_COL_SLIDER + UI_AUDIO_COL_VALUE + UI_AUDIO_COL_RECORD)
+// ripples' test buttons across the slider, value and record columns (page_audio.c)
+#define AUDIO_TEST_AREA_W (UI_AUDIO_COL_SLIDER + UI_AUDIO_COL_VALUE + UI_AUDIO_COL_RECORD)
 #define AUDIO_TEST_BUTTON_W ((AUDIO_TEST_AREA_W - 3 * UI_AUDIO_TEST_BUTTON_GAP) / 4)
-#define SOURCE_ROW_W (UI_AUDIO_COL_LABEL + AUDIO_TEST_AREA_W)
-#define SOURCE_LABEL_GAP 12
 
 // lv_conf.h's tick source (the firmware's util/time.c); not used for measuring
 uint32_t time_ms(void) {
@@ -35,9 +34,19 @@ static int room(const char *kind, const lv_font_t **font) {
     if (strcmp(kind, "label") == 0)
         return UI_AUDIO_COL_LABEL - 8; // the label column, a few pixels to the slider / buttons
     if (strcmp(kind, "button") == 0)
-        return UI_AUDIO_COL_BUTTON - UI_AUDIO_ARROW_W - UI_AUDIO_BTN_PAD;
-    if (strcmp(kind, "source_row") == 0)
-        return SOURCE_ROW_W; // label|button|button|button, see main()
+        return UI_AUDIO_BUTTON_W - UI_AUDIO_ARROW_W - UI_AUDIO_BTN_PAD;
+    if (strcmp(kind, "record") == 0)
+        return UI_AUDIO_COL_RECORD; // an input's Record cell, centred
+    if (strcmp(kind, "mark") == 0)
+        return UI_AUDIO_COL_VALUE + UI_AUDIO_COL_RECORD; // after a switch's buttons
+    if (strcmp(kind, "title_headphones") == 0) {
+        *font = UI_AUDIO_HEADING_FONT;
+        return UI_AUDIO_COL_SLIDER + UI_AUDIO_COL_VALUE;
+    }
+    if (strcmp(kind, "title_record") == 0) {
+        *font = UI_AUDIO_HEADING_FONT;
+        return UI_AUDIO_COL_RECORD;
+    }
     if (strcmp(kind, "note") == 0) {
         *font = UI_PAGE_LABEL_FONT; // ripples' note of the test buttons, a line of it
         return ROW_W;
@@ -127,25 +136,7 @@ int main(void) {
         }
 
         lv_point_t size;
-        if (strcmp(kind, "source_row") == 0) {
-            // ripples' Audio Source row (page_audio.c create_source()): the label and three buttons,
-            // each its text + SOURCE_LABEL_GAP, the buttons also their arrow and padding
-            size.x = 0;
-            int part = 0;
-            for (char *p = text; p; part++) {
-                char *bar = strchr(p, '|');
-                if (bar)
-                    *bar = 0;
-                lv_point_t piece;
-                lv_txt_get_size(&piece, p, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-                size.x += piece.x + SOURCE_LABEL_GAP + (part ? UI_AUDIO_ARROW_W + UI_AUDIO_BTN_PAD : 0);
-                if (bar)
-                    *bar = '|';
-                p = bar ? bar + 1 : NULL;
-            }
-        } else {
-            lv_txt_get_size(&size, text, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        }
+        lv_txt_get_size(&size, text, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
         const char *verdict = missing[0] ? "GLYPH" : (size.x > max ? "WIDE" : "OK");
         if (strcmp(verdict, "OK") != 0)

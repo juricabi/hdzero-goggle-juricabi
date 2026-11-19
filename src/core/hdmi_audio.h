@@ -11,7 +11,7 @@
  *   audio_in=0   1 = while HDMI in is shown, the record daemon plays I2S2 (ALSA
  *                    hw:snddaudio2, assumed IT66021 audio) into the codec DAC, which
  *                    the audio mixer takes in as a live source (the HDMI In level of
- *                    the Audio page; recorded with Record Headphone Mix); the line out
+ *                    the Audio page; heard only, not recorded); the line out
  *                    then stays on during HDMI in. The EDID offers 48 kHz L-PCM only.
  * Only exactly "1" counts; any other value, a missing key or an unreadable file is 0.
  *

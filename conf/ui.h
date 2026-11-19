@@ -129,16 +129,18 @@ extern "C" {
 #define UI_POWER_ROWS                     60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, LV_GRID_TEMPLATE_LAST
 #define UI_RECORD_COLS                    160, 200, 200, 160, 120, 120, LV_GRID_TEMPLATE_LAST
 #define UI_RECORD_ROWS                    60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, LV_GRID_TEMPLATE_LAST
-// Audio page (ripples' rows with all's extras): indent, label, two button columns (arrow + button;
-// sliders, ripples' Audio Source and its test buttons span them, the spacer and the value column),
-// spacer, value; section headings span the row. The rows scroll in a window of UI_AUDIO_VIEW_H with
-// the hint below it (up to UI_AUDIO_HINT_LINES lines: ripples' note of the test buttons). Every
-// translation fits (utilities/audio_mixer/check_strings.py).
+// Audio page: indent, label, slider, value, record (the Record switch of an input: Yes / No). A
+// switch row (DVR Audio, HDMI) has its two buttons in the slider column, the test buttons span the
+// slider, value and record columns, section headings the row (the first one with the titles of the
+// Headphones and Record columns). The rows scroll in a window of UI_AUDIO_VIEW_H with the hint below
+// it (up to UI_AUDIO_HINT_LINES lines: ripples' note of the test buttons). Every translation fits
+// (utilities/audio_mixer/check_strings.py).
 #define UI_AUDIO_COL_INDENT               171 // no column gaps: labels where the other pages have them
-#define UI_AUDIO_COL_LABEL                400
-#define UI_AUDIO_COL_BUTTON               152
-#define UI_AUDIO_COL_SPACER               0
-#define UI_AUDIO_COL_VALUE                120 // "Mix", "Restart", "Error", "+6.0 dB" in every language
+#define UI_AUDIO_COL_LABEL                300
+#define UI_AUDIO_COL_SLIDER               284
+#define UI_AUDIO_COL_VALUE                120 // "Restart", "Error", "+6.0 dB" in every language
+#define UI_AUDIO_COL_RECORD               120
+#define UI_AUDIO_BUTTON_W                 142 // a switch's button: two in the slider column
 #define UI_AUDIO_GRID_MAX_W               995 // page view width - UI_STYLE_SUBMENU_PAD_LEFT - room for the scroll bar
 #define UI_AUDIO_ARROW_W                  36
 #define UI_AUDIO_BTN_PAD                  8
@@ -311,10 +313,11 @@ static inline int UI_STATUS_BAR_LABEL_WIDTH() {
 #define UI_RECORD_ROWS                    40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, LV_GRID_TEMPLATE_LAST
 // Audio page, as on the goggles
 #define UI_AUDIO_COL_INDENT               112
-#define UI_AUDIO_COL_LABEL                300
-#define UI_AUDIO_COL_BUTTON               120
-#define UI_AUDIO_COL_SPACER               0
+#define UI_AUDIO_COL_LABEL                230
+#define UI_AUDIO_COL_SLIDER               220
 #define UI_AUDIO_COL_VALUE                90
+#define UI_AUDIO_COL_RECORD               90
+#define UI_AUDIO_BUTTON_W                 110
 #define UI_AUDIO_GRID_MAX_W               742
 #define UI_AUDIO_ARROW_W                  28
 #define UI_AUDIO_BTN_PAD                  6
