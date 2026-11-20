@@ -18,7 +18,7 @@ Goggle 1; juricabi.2 addresses what that showed and is being tried on that goggl
 * **Automatic DVR that keeps the backpack's word**: armed on the radio, it records whenever the video is shown,
   also after a menu, a channel or a source switch; disarmed, Record Mode Auto does not start a new recording;
   the DVR button wins. [docs/dvr.md](docs/dvr.md)
-  **On the radio set ExpressLRS Telem Ratio to 1:16** (not Std): with Std at 250 or 500 Hz about one
+  **On the radio set ExpressLRS Telem Ratio to 1:16 or 1:32** (not Std): with Std at 250 or 500 Hz about one
   backpack command in four never reaches the goggle.
 * **Module bay control**: tune an analog module in the bay from the goggle (Switch, rapidFIRE, SteadyView,
   SteadyView X), also from the radio's channel commands. Needs the 3-wire bay mod; with Module = None (the

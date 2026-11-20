@@ -64,9 +64,9 @@ position, however busy the goggle was meanwhile.
   the owner's `dvr_dbg.log`, but up to 3 s for a recording stopped within a second of its start: at most
   4 s). A start waits for a stop that the recorder has not finished. The reader thread never waits.
 
-## Commands that never arrive: set the radio's Telem Ratio to 1:16
+## Commands that never arrive: set the radio's Telem Ratio to 1:16 or 1:32
 
-**On the radio, ExpressLRS Lua: Telem Ratio 1:16 (or 1:32) instead of Std.** With Std at 250 Hz or
+**On the radio, ExpressLRS Lua: Telem Ratio 1:16 or 1:32 instead of Std.** With Std at 250 Hz or
 500 Hz about one DVR switch change in four never reaches the HDZero goggle.
 
 What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem Ratio Std):
@@ -88,6 +88,11 @@ What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem R
 * With Telem Ratio 1:16 the slot comes every 64 ms: 24 of 24 changes arrived, the 256 ms grid was gone
   and a 64 ms grid took its place (the owner's log of 2026-11-20). The cost is about 6 % of the control
   packets (250 -> 234 a second).
+* On the final image, with the unchanged backpack 1.5.9 on the goggle (the 24-of-24 run above was made on
+  the debug build, which also had WiFi power save off): Telem Ratio 1:64 at 100 mW still lost at least 8
+  of 54 changes (the goggle's log), so a lower transmit power does not help. With 1:16 and with 1:32 (a
+  slot every 128 ms, still inside the ~190 ms; 250 -> 242 packets a second) the owner saw none lost (the
+  owner's report, no log read).
 
 The owner's ESP32-C3 backpack on an Orqa goggle works with Std on the same radio, so the difference is on
 the receiving side. The owner's explanation: the antenna (the C3 board has a proper one, the HDZero goggle's
