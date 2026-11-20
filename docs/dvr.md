@@ -71,7 +71,8 @@ position, however busy the goggle was meanwhile.
 transmitter's own 2.4 GHz signal overwhelms the backpack's ESP-NOW packet, so the goggle's backpack chip never
 receives it. The owner's ESP32-C3 backpack on another goggle loses commands the same way, so neither this
 firmware nor the HDZero goggle causes it. The Telem Ratio is not the cause either: even with telemetry Off the
-backpack works.
+backpack works. The HDZero goggle's backpack chip sits inside the housing, so it may lose them a little sooner
+(not measured); the cause is the transmitter.
 
 **With the quad connected there is no problem at all.** With no quad, keep the transmitter at a normal power,
 such as 100 mW: that avoids it too. So if DVR commands get lost while you test on the bench, check this first:
