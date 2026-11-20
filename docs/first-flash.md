@@ -151,8 +151,9 @@ Change no setting yet. Check each item against what the goggle did with ripples'
 6. **WiFi**: as you use it; then switch it off again.
 7. **ELRS backpack**, if you use it: channel commands and DVR on arm. The DVR follows the arm also through a
    menu and a channel switch, and Record Mode Auto no longer restarts after a disarm (docs/dvr.md, "Checks").
-   **Set Telem Ratio to 1:16 or 1:32 in the ExpressLRS Lua first** (not Std): with Std at 250 or 500 Hz about one
-   command in four never reaches the goggle (docs/dvr.md, "Commands that never arrive").
+   **Test it with the quad connected:** with no quad and the ELRS transmitter at 1000 mW, the radio's backpack
+   command gets lost after a few arms; the Telem Ratio does not matter (docs/dvr.md, "Commands that never
+   arrive").
 8. **Standby and wake**: as you usually do.
 
 If something that worked with ripples' 1.2.2 does not work now, go back (section 9.1) and report what you saw.

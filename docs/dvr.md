@@ -64,15 +64,32 @@ position, however busy the goggle was meanwhile.
   the owner's `dvr_dbg.log`, but up to 3 s for a recording stopped within a second of its start: at most
   4 s). A start waits for a stop that the recorder has not finished. The reader thread never waits.
 
-## Commands that never arrive: set the radio's Telem Ratio to 1:16 or 1:32
+## Commands that never arrive: the radio at 1000 mW with no quad connected
 
-**On the radio, ExpressLRS Lua: Telem Ratio 1:16 or 1:32 instead of Std.** With Std at 250 Hz or
-500 Hz about one DVR switch change in four never reaches the HDZero goggle.
+**Found by the owner on 2026-11-20:** with no quad connected and the ELRS transmitter at its maximum,
+1000 mW, the DVR command that the radio's backpack sends over ESP-NOW gets lost after a few arms. The
+transmitter's own 2.4 GHz signal overwhelms the backpack's ESP-NOW packet, so the goggle's backpack chip never
+receives it. The owner's ESP32-C3 backpack on another goggle loses commands the same way, so neither this
+firmware nor the HDZero goggle causes it. The Telem Ratio is not the cause either: even with telemetry Off the
+backpack works.
 
-In short: the goggle's backpack chip receives a command only while the ELRS transmitter pauses to listen
-for telemetry, and the radio sends each switch change once and gives up after about 0.2 s (an estimate, see
-below). The Telem Ratio
-sets how far apart the pauses are (packet interval x ratio). It is a matter of timing, not of transmit power:
+If DVR commands get lost while you test on the bench, check this first: is a quad connected, and is the
+transmitter at 1000 mW? Nothing in the goggle's firmware can make up for a command that never reaches the
+goggle.
+
+Where a real fix would belong: the radio's backpack chip. ExpressLRS Backpack 1.5.9 (`src/Tx_main.cpp`,
+`sendMSPViaEspnow()`) hands each command to ESP-NOW once, ignores the result and registers no send
+callback, and ExpressLRS sends each switch change once. Nobody notices a command the goggle did not
+acknowledge. Resending the last recording state until it is acknowledged would deliver it as soon as a
+packet gets through. Not written, not tested.
+
+### Earlier tests: the Telem Ratio (advice withdrawn)
+
+Until 2026-11-20 this page, the README and the release notes advised ExpressLRS Telem Ratio 1:16 or 1:32
+instead of Std. That advice is withdrawn: the Telem Ratio is not the cause. The tests behind it are kept as
+they were made. They fit the cause above: the backpack's packet got through only in the transmitter's
+telemetry slots, while the transmitter was silent. One result does not fit and was not checked again: with Std
+at 100 mW commands were lost too.
 
 | at 250 Hz (a packet every 4 ms) | a pause every | DVR commands |
 |---|---|---|
@@ -80,15 +97,6 @@ sets how far apart the pauses are (packet interval x ratio). It is a matter of t
 | 1:32 | 128 ms | none lost, also at 1 W |
 | 1:16 | 64 ms | none lost |
 
-For other packet rates the same sum should hold (a pause every 128 ms or less; at 500 Hz that is 1:64);
-only 250 Hz was tested. Nothing in the goggle's firmware can make up for it: a lost command never reaches
-the goggle.
-
-Where a real fix would belong: the radio's backpack chip. ExpressLRS Backpack 1.5.9 (`src/Tx_main.cpp`,
-`sendMSPViaEspnow()`) hands each command to ESP-NOW once, ignores the result and registers no send
-callback, and ExpressLRS sends each switch change once. Nobody notices a command the goggle did not
-acknowledge. Resending the last recording state until it is acknowledged would deliver it in the next
-pause at any Telem Ratio. Not written, not tested.
 
 What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem Ratio Std):
 
@@ -111,16 +119,11 @@ What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem R
   packets (250 -> 234 a second).
 * On the final image, with the unchanged backpack 1.5.9 on the goggle (the 24-of-24 run above was made on
   the debug build, which also had WiFi power save off): Telem Ratio 1:64 at 100 mW still lost at least 8
-  of 54 changes (the goggle's log), so a lower transmit power does not help. With 1:16 and with 1:32 (a
+  of 54 changes (the goggle's log). With 1:16 and with 1:32 (a
   slot every 128 ms, still inside the ~190 ms; 250 -> 242 packets a second) the owner saw none lost, with
-  1:32 also at 1 W (the owner's report, no log read). The transmit power does not decide it; the spacing
-  of the slots does.
+  1:32 also at 1 W (the owner's report, no log read).
 
-The owner's ESP32-C3 backpack on an Orqa goggle works with Std on the same radio, so the difference is on
-the receiving side. The owner's explanation: the antenna (the C3 board has a proper one, the HDZero goggle's
-ESP32 sits inside the housing), so the C3 still hears the backpack's 90 mW next to the ELRS transmitter's
-1 W. It fits the logs; it has not been measured. Not tested: 500 Hz, Race (no telemetry slot at all while
-armed), other goggles.
+Not tested in these runs: 500 Hz, Race.
 
 A command that is lost all the same leaves the DVR in the old state until the next switch change (in the
 log: a start after a start, or a stop after a stop).

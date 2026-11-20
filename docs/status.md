@@ -87,13 +87,12 @@ What the owner found with juricabi.1 and the test images on the Goggle 1, the ca
     reader thread, so commands queued; a menu dropped a start; Record Mode Auto restarted after a disarm. Now
     `src/core/dvr_auto.c` follows the backpack's last word from the peripheral thread, and the goggle waits for
     the recorder's status instead of 2 s.
-  * Cause **outside the goggle**: about 1 switch change in 4 never reached the goggle's backpack chip, and the
-    rest came on a 256.0 ms grid: the ELRS transmitter's telemetry cycle with Telem Ratio Std at 250 Hz. The
-    backpack's packet got through only while the transmitter listened. **Telem Ratio 1:16 or 1:32 on the
-    radio**: with 1:16, 24 of 24 arrived; 1:32 works as well, also at 1 W, while 1:64 loses commands at 100 mW
-    too (the owner's tests with the unchanged backpack 1.5.9). The spacing of the telemetry slots decides it,
-    not the transmit power. Found with a debug build of backpack 1.5.9 whose log goes into `HDZGOGGLE.log`;
-    ruled out on the way: head tracking, the goggle's WiFi, distance, WiFi power save on the chip.
+  * Cause **outside the goggle**, found by the owner on 2026-11-20: with no quad connected and the ELRS
+    transmitter at 1000 mW, the command the radio's backpack sends over ESP-NOW gets lost after a few arms (the
+    transmitter overwhelms it). The owner's ESP32-C3 backpack on another goggle shows the same. The Telem Ratio
+    is not the cause (even with telemetry Off the backpack works): the earlier advice, Telem Ratio 1:16 or 1:32,
+    is withdrawn. The earlier tests (a debug build of backpack 1.5.9 logging into `HDZGOGGLE.log`: commands came
+    only on the 256 ms telemetry grid; with 1:16, 24 of 24 arrived) are in docs/dvr.md, "Earlier tests".
 * **The DVR started and stopped every second while armed** (one boot). Cause: the SD card's filesystem was
   damaged (below), the recorder could not write, every start failed, and the armed DVR retried every second.
   A start that does not bring the recorder to "recording" now counts as failed (logged with the reason), and
@@ -479,11 +478,11 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
    BoxPro images have not run on hardware.
 2. Done 2026-11-20: the goggle's backpack runs the unchanged 1.5.9 again (its page reports 1.5.9 (437a4f), the
    tag's commit); the debug build used to find the lost commands is off it.
-3. The owner's ESP32-C3 backpack on an Orqa goggle receives the same radio's commands with Telem Ratio Std; the
-   HDZero goggle's built-in ESP32 does not. The owner's explanation: the antenna (a proper one on the C3 board,
-   the goggle's ESP32 inside the housing). Not measured. Not tested: 500 Hz, Race, other goggles. A fix on the
+3. Lost DVR commands: the owner found the cause on 2026-11-20 (docs/dvr.md, "Commands that never arrive"): with
+   no quad connected and the transmitter at 1000 mW, the radio's backpack command gets lost after a few arms; the
+   same with the owner's ESP32-C3 backpack on another goggle. The Telem Ratio is not the cause. A fix on the
    radio's side for everyone (the TX backpack sending a command again when no acknowledgement came; docs/dvr.md
-   has where) would be ExpressLRS's. The owner stays with Telem Ratio 1:32 and does not want it built here.
+   has where) would be ExpressLRS's; the owner does not want it built here.
 4. A recording stopped within a second of its start takes ripples' recorder up to 3 s to stop (the owner's
    `dvr_dbg.log`); the goggle waits for it. Not looked into.
 5. A decision for the owner: ripples' `test_dvr_naming.c` does not build on glibc; fix it here (it is ripples'
