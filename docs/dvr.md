@@ -91,8 +91,9 @@ What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem R
 * On the final image, with the unchanged backpack 1.5.9 on the goggle (the 24-of-24 run above was made on
   the debug build, which also had WiFi power save off): Telem Ratio 1:64 at 100 mW still lost at least 8
   of 54 changes (the goggle's log), so a lower transmit power does not help. With 1:16 and with 1:32 (a
-  slot every 128 ms, still inside the ~190 ms; 250 -> 242 packets a second) the owner saw none lost (the
-  owner's report, no log read).
+  slot every 128 ms, still inside the ~190 ms; 250 -> 242 packets a second) the owner saw none lost, with
+  1:32 also at 1 W (the owner's report, no log read). The transmit power does not decide it; the spacing
+  of the slots does.
 
 The owner's ESP32-C3 backpack on an Orqa goggle works with Std on the same radio, so the difference is on
 the receiving side. The owner's explanation: the antenna (the C3 board has a proper one, the HDZero goggle's
