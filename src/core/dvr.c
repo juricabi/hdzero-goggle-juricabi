@@ -772,6 +772,10 @@ bool dvr_cmd(osd_dvr_cmd_t cmd) {
             }
         }
     } else {
+        // juricabi: a stop also ends a start that waits for the card (in, not ready yet). Without a card it
+        // always did (above); with one the start stayed and ran once the card was ready, after a disarm, a
+        // menu or the button had said stop.
+        record_pending = false;
         if (dvr_is_recording) {
             dvr_is_recording = false;
             dvr_dbg_log("stop_request cmd=%d", cmd);
