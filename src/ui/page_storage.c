@@ -1,5 +1,6 @@
 #include "page_storage.h"
 
+#include <dirent.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -487,6 +488,27 @@ static void page_storage_on_roller(uint8_t key) {
 }
 
 /**
+ * What "rm -rf <the DVR folder>/*" should have removed and did not: the folder's entries but for dot files.
+ * -1 when the folder cannot be read (there is none: nothing to clear).
+ */
+static int page_storage_dvr_entries_left(void) {
+    DIR *dir = opendir(REC_diskPATH REC_packPATH);
+    if (dir == NULL) {
+        return -1;
+    }
+
+    int left = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] != '.') {
+            left++;
+        }
+    }
+    closedir(dir);
+    return left;
+}
+
+/**
  * Main input selection routine for this page.
  */
 static void page_storage_on_click(uint8_t key, int sel) {
@@ -553,10 +575,19 @@ static void page_storage_on_click(uint8_t key, int sel) {
                 LOGI("Clear dvr folder");
                 char buf[256];
                 snprintf(buf, sizeof(buf), "rm -rf %s%s/*", REC_diskPATH, REC_packPATH);
-                system_exec(buf);
-                snprintf(buf, sizeof(buf), "%s #FFFF00 %s#", _lang("Clear DVR Folder"), _lang("Done"));
+                const int rm_status = system_exec(buf);
+                // "Done" only for a folder that is empty now. A card whose filesystem the kernel found damaged is
+                // read-only until the next start: rm removes nothing, and the clips stayed in Playback under a "Done".
+                const int left = page_storage_dvr_entries_left();
+                if (left > 0) {
+                    LOGE("Clear dvr folder failed: %d entries left, rm status %d (a damaged card is read-only until a restart)",
+                         left, rm_status);
+                    snprintf(buf, sizeof(buf), "%s #FF0000 %s#", _lang("Clear DVR Folder"), _lang("FAILED"));
+                } else {
+                    LOGI("Clear done");
+                    snprintf(buf, sizeof(buf), "%s #FFFF00 %s#", _lang("Clear DVR Folder"), _lang("Done"));
+                }
                 lv_label_set_text(page_storage.clear_dvr, buf);
-                LOGI("Clear done");
                 page_storage.confirm_clear = 3;
                 g_sdcard_det_req = 1;
             } else {

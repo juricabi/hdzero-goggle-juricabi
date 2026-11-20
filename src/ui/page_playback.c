@@ -300,8 +300,10 @@ static int walk_sdcard() {
     }
     free(namelist);
 
-    // copy all thumbnail files to /tmp
-    snprintf(fname, sizeof(fname), "cp %s*." REC_packJPG " %s", MEDIA_FILES_DIR, TMP_DIR);
+    // The thumbnails' copies in /tmp are those of the clips in the folder now. The copies of removed clips used to
+    // stay until the next start, and a new clip that took a removed clip's name (after Clear DVR Folder the numbers
+    // start again) could show the old picture.
+    snprintf(fname, sizeof(fname), "rm -f %s/*." REC_packJPG "; cp %s*." REC_packJPG " %s", TMP_DIR, MEDIA_FILES_DIR, TMP_DIR);
     system_exec(fname);
 
     return media_db.count;

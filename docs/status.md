@@ -63,6 +63,13 @@ What the owner found with juricabi.1 and the test images on the Goggle 1, the ca
   swapped about ten times that evening). The recorder syncs after closing a clip, the app after a stop.
 * **`dvr_dbg.log` grew without end** (ripples' trace, always on, an fsync per line). It follows Storage,
   Logging now and is kept under 512 KB with one older copy.
+* **After Clear DVR Folder the clips stayed in Playback and opened as "Bad file" until a restart** (seen by the
+  owner more than once, on older firmware too). Playback reads its list from the folder each time it is opened,
+  so the clips had not been removed. The likely cause, not reproduced: a card whose filesystem the kernel found
+  damaged (the item above) is read-only until the next start, `rm` removes nothing, and the page said "Done"
+  all the same. Clear DVR Folder now says FAILED and logs it when entries are left. Playback also drops the
+  thumbnail copies of removed clips from `/tmp` each time it reads the folder: after a clear the clip numbers
+  start again, and a new clip could have shown a removed clip's picture.
 * **The Audio page was confusing** (ripples' Audio Source and the Record switches were the same setting, Live
   Volume moved A/V In, Record Headphone Mix greyed out what it heard): one row per input with its Headphones
   level and Record switch, nothing linked; Record Level of its own; Record Headphone Mix gone; a juricabi.1
@@ -74,7 +81,7 @@ What the owner found with juricabi.1 and the test images on the Goggle 1, the ca
 **On the owner's Goggle 1 so far**: test images e2d88c7 and 9a6ee17 (the new Audio page; the DVR following the
 switch, exact delays, no fixed 2 s wait; with Telem Ratio 1:16 or 1:32 no command lost). **Not yet run on a goggle**:
 everything after 9a6ee17 (a failed start, the retry back-off, the start waiting for an unfinished stop, the sync
-after a clip, `dvr_dbg.log` following Logging).
+after a clip, `dvr_dbg.log` following Logging, Clear DVR Folder's check and the thumbnail copies).
 
 Tests adapted to the 1.2.2 base: the live-stream audio suite's `t_pause.sh` stops the live encoding with the goggle
 message 1.2.2's app sends (`LIVE_cmdSTOP`) instead of ripples' newer control queue; `t_snapshot.sh` and `ctl_conf`
