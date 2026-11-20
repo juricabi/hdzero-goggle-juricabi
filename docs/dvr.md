@@ -109,9 +109,24 @@ DVR auto: Record Mode Auto does not start a recording (the backpack is disarmed)
 ```
 
 A start after a start, or a stop after a stop, in the `backpack` lines is a command that never arrived
-(section above). `dvr_dbg.log` (always written) has the recorder's own steps, how long the recorder took
-to start or stop (`start: the recorder's status 1 after ... ms`), and since juricabi.2 a line for a slow
-part of the recorder's loop (`slow live_run: ... ms`).
+(section above). `dvr_dbg.log` has the recorder's own steps, how long the recorder took to start or stop
+(`start: the recorder's status 1 after ... ms`), and since juricabi.2 a line for a slow part of the
+recorder's loop (`slow live_run: ... ms`). Since juricabi.2 it is written **only with Storage, Logging On**
+as well (ripples wrote it always, a line with an fsync at every DVR start and stop, without end), and it is
+kept under 512 KB with one older copy (`dvr_dbg.log.1`). Switch Logging off again after looking for a
+fault: both logs are extra writes on the card.
+
+## A clip is on the card when the recording stops
+
+ripples' recorder closed a clip and left its end and its directory entry in the kernel's write cache; the
+app's next start synced them. A card pulled, or the goggle switched off, within about half a minute of a
+stop lost that last clip: 0 bytes on the card, its data as lost chains (the owner's card, 2026-11-20,
+after about ten card swaps in an evening; the recorder then could not write on that card at all, and
+every start failed). Since juricabi.2 the recorder syncs after closing a clip and the app after a stop.
+
+Still true, as on every firmware of this goggle: power cut or the card pulled **while recording** loses
+the end of that clip and can leave the filesystem damaged. Stop the recording (disarm) first. A damaged
+card: `chkdsk X: /f` on a PC, or Storage, Format on the goggle.
 
 ## Checks
 

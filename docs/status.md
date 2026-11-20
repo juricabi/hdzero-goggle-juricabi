@@ -1,26 +1,98 @@
-# Status of juricabi's firmware, and how to continue (2026-11-19)
+# Status of juricabi's firmware, and how to continue (2026-11-20)
 
-juricabi's firmware (version `1.2.2-juricabi.1`) carries this project's additions on top of **ripples' custom
-firmware** (LVTY-AI/hdzero-goggle, `main` 4fbb865, "1.2.2-ripples", MIT, by JustinRipley), which the owner prefers
-as the base. ripples' history is upstream HDZero's with rewritten hashes (no merge base with upstream a85841d), so
-the additions are **ported** from `all` (082b2f5), not merged. **Nothing of it has run on a real goggle.**
+juricabi's firmware (version `1.2.2-juricabi.2`) carries this project's additions on top of **ripples' custom
+firmware 1.2.2** (LVTY-AI/hdzero-goggle, the release: tag `ripples-v1.2.2`, 3f0461f, "1.2.2-ripples", MIT, by
+JustinRipley), which the owner prefers as the base. ripples' history is upstream HDZero's with rewritten hashes (no
+merge base with upstream a85841d), so the additions are **ported** from `all` (082b2f5), not merged.
+**juricabi.1 and test images of juricabi.2 ran on the owner's Goggle 1** (section "juricabi.2": what ran there
+and what has not yet).
 
-History: until 2026-11-19 this work was called ripples-all, on a branch of that name in juricabi/hdzero-goggle
-(on ripples' 4fbb865, kept there as a branch of its own); since then it is juricabi's firmware,
-https://github.com/juricabi/hdzero-goggle-juricabi. The sections of phases 1 to 4 below record that work, under the
-new names (juricabi's firmware for ripples-all, ripples 1.2.2 (4fbb865) for ripples-base).
+History: until 2026-11-19 this work was called ripples-all, on a branch of that name in juricabi/hdzero-goggle;
+since then it is juricabi's firmware, https://github.com/juricabi/hdzero-goggle-juricabi. Phases 1 to 4 and
+juricabi.1 were built on ripples' `main` as it was then (4fbb865, 30 commits after the 1.2.2 release, unreleased);
+juricabi.2 moved the same commits onto the release. The sections of phases 1 to 4 below record that work as it was
+done, on 4fbb865.
 
 ## Branches (https://github.com/juricabi/hdzero-goggle-juricabi)
 
 | branch | state |
 |---|---|
-| `upstream` | ripples' `main` 4fbb865 (ripples 1.2.2), untouched |
-| `main` | `upstream` + the port: juricabi's firmware. Work goes here. Tag `v1.2.2-juricabi.1`: the first pre-release |
+| `upstream` | ripples' 1.2.2 release (3f0461f), untouched (until juricabi.2: ripples' `main` 4fbb865) |
+| `main` | `upstream` + the port: juricabi's firmware. Work goes here. Rewritten for juricabi.2 (rebased onto the release) |
+| `juricabi.1` | `main` as it was for juricabi.1 (04c4651, on 4fbb865), kept. Tag `v1.2.2-juricabi.1` (c8d8072) is on it |
 
 `all`, the previous integration branch (upstream HDZero a85841d + audio mixer, live-stream audio, HDMI audio,
 module bay; its docs/status.md has the history and the reviews), stays in juricabi/hdzero-goggle.
 
-Local worktree on the developer's machine (WSL): `/root/hdz/goggle-ripples` (branch `juricabi`, pushed as `main`).
+Local worktree on the developer's machine (WSL): `/root/hdz/goggle-ripples` (branch `juricabi-122`, pushed as
+`main`; the local branch `juricabi` there is juricabi.1's).
+
+## juricabi.2
+
+What the owner found with juricabi.1 and the test images on the Goggle 1, the cause of each, and what was done:
+
+* **The yellow "DVR: waiting for recorder to finish"** at every menu press, source and channel switch.
+  Cause: ripples' deferred DVR transitions, which came with ripples' `main` after the 1.2.2 release (e41a0c9 and
+  the fixes after it) and were in juricabi.1's base; ripples' 1.2.2 shows no such text. **The base is now the
+  1.2.2 release**: the 34 commits of juricabi.1 were rebased onto 3f0461f. Conflicts only where ripples' `main`
+  had changed the same lines (`elrs.c`, `input_device.c`, `src/record/main.c`, `app_state.c`, `thread.c`,
+  `dvr.c`). Of ripples' 30 commits after 1.2.2, only the **security fix** 2821180 ("install updates from the SD
+  card only") is taken, cherry-picked. The others wait for ripples' next release.
+* **Every DVR stop took about 2 s** in juricabi.1. Cause: with nothing routed into the ADC, DAPM powers the ADC
+  down while the record daemon captures, and stopping waited for the capture's timeout. The mixer keeps the mic
+  on the ADC at the minimum ADC volume when nothing is recorded (docs/audio.md, "The ADC always has a source").
+* **The DVR over the ELRS backpack "works weird", lags, misses** (docs/dvr.md has all of it):
+  * Cause in the goggle firmware: ripples' `dvr_cmd()` slept 2 s after every start and stop, in the backpack's
+    reader thread, so commands queued; a menu dropped a start; Record Mode Auto restarted after a disarm. Now
+    `src/core/dvr_auto.c` follows the backpack's last word from the peripheral thread, and the goggle waits for
+    the recorder's status instead of 2 s.
+  * Cause **outside the goggle**: about 1 switch change in 4 never reached the goggle's backpack chip, and the
+    rest came on a 256.0 ms grid: the ELRS transmitter's telemetry cycle with Telem Ratio Std at 250 Hz. The
+    backpack's packet got through only while the transmitter listened. **Telem Ratio 1:16 on the radio**: 24 of
+    24 arrived. Found with a debug build of backpack 1.5.9 whose log goes into `HDZGOGGLE.log`; ruled out on the
+    way: head tracking, the goggle's WiFi, distance, WiFi power save on the chip.
+* **The DVR started and stopped every second while armed** (one boot). Cause: the SD card's filesystem was
+  damaged (below), the recorder could not write, every start failed, and the armed DVR retried every second.
+  A start that does not bring the recorder to "recording" now counts as failed (logged with the reason), and
+  the retries back off: 1 s, 5 s, then every 15 s.
+* **The SD card's filesystem was damaged** (chkdsk: the last clip 0 bytes, its data as lost chains). Cause:
+  ripples' recorder closed a clip without syncing; the clip's end and directory entry reached the card only
+  with the app's next start, so a card pulled within about half a minute of a stop lost the clip (the card was
+  swapped about ten times that evening). The recorder syncs after closing a clip, the app after a stop.
+* **`dvr_dbg.log` grew without end** (ripples' trace, always on, an fsync per line). It follows Storage,
+  Logging now and is kept under 512 KB with one older copy.
+* **The Audio page was confusing** (ripples' Audio Source and the Record switches were the same setting, Live
+  Volume moved A/V In, Record Headphone Mix greyed out what it heard): one row per input with its Headphones
+  level and Record switch, nothing linked; Record Level of its own; Record Headphone Mix gone; a juricabi.1
+  setting.ini taken over (docs/audio.md).
+* **Analog showed no picture** with the owner's Raspberry Pi transmitter: the same on ripples 1.2.2, not this
+  firmware. **Channel control on analog** works only with the module bay under control (3-wire mod, Module =
+  rapidFIRE, WiFi off), as ripples does on the Goggle 1.
+
+**On the owner's Goggle 1 so far**: test images e2d88c7 and 9a6ee17 (the new Audio page; the DVR following the
+switch, exact delays, no fixed 2 s wait; with Telem Ratio 1:16 no command lost). **Not yet run on a goggle**:
+everything after 9a6ee17 (a failed start, the retry back-off, the start waiting for an unfinished stop, the sync
+after a clip, `dvr_dbg.log` following Logging).
+
+Tests adapted to the 1.2.2 base: the live-stream audio suite's `t_pause.sh` stops the live encoding with the goggle
+message 1.2.2's app sends (`LIVE_cmdSTOP`) instead of ripples' newer control queue; `t_snapshot.sh` and `ctl_conf`
+are gone (1.2.2's recorder runs on no config snapshot); the HDMI C tests compare with 3f0461f; `test_mixer.py`
+models the juricabi.2 page.
+
+### Results of juricabi.2 (all on the PC)
+
+| check | result |
+|---|---|
+| ripples' tests (`utilities/dev/run_ripples_tests.sh`) | battery, framebuffer, hdmi x3, ht, motion x3, screen, sleep, video, both safety tests, `record_avshare_only`: rc 0. `record`: rc 2, `test_dvr_naming` does not build on glibc (the same at ripples' own 1.2.2 tag) |
+| `test/dvr` (the automatic DVR's decisions) | passes; 25 of 25 mutants of `dvr_auto.c` caught |
+| `utilities/module_bay_test` | 44 checks, all passed; `check_strings.py`: 46 strings x 6 languages fit |
+| `utilities/audio_mixer/test_mixer.py` | all passed (3 targets); `mutants.py`: 94 of 94 caught (93 in the full run; the 94th, "[record] not brought in line with all's values", after a check added for it: run alone) |
+| probe kit (`utilities/dev/run_probe.sh run`) | rc 0 |
+| `utilities/dev/check_version.py` | all passed |
+| live-stream audio (`utilities/dev/run_live.sh all`) | all passed (builds `src/record/main.c` with the sync after a clip) |
+| HDMI C tests (`it66121_seq_test.sh`, `it66021_edid_test.sh`, `pcmbridge_test.sh`, `hdmi_boot_test.sh`) | not run again on the 1.2.2 base (those drivers are the same in 3f0461f and 4fbb865) |
+| emulator | the Audio page of e2d88c7 looked through (key scripts); not run again after it |
+| the waits for the recorder in `dvr.c`, the sync after a clip, `dvr_dbg.log` following Logging | no host test; not yet run on a goggle |
 
 ## Phases
 
@@ -330,7 +402,7 @@ All on Linux (WSL Ubuntu 24.04, root), worktree on the Linux file system. Script
 utilities/dev/build_all.sh /root/hdz/goggle-ripples goggle goggle2 boxpro   # images + .sha256 -> $OUT
 utilities/dev/emu_build.sh goggle                                            # SDL emulator build (also goggle2, boxpro)
 utilities/dev/emu_run.sh /root/hdz/emu/build_goggle - $PWD/utilities/dev/keys/check_start.txt g1_none   # always sandboxed
-utilities/dev/run_ripples_tests.sh                                           # ripples' test/*, as an unprivileged uid
+utilities/dev/run_ripples_tests.sh                                           # ripples' test/* and test/dvr, as an unprivileged uid
 make -C utilities/module_bay_test test                                       # ~2 min; mutants.sh ~20 min
 python3 utilities/module_bay_test/check_strings.py
 python3 utilities/audio_mixer/test_mixer.py                                  # ~90 s; mutants.py ~45 min, check_strings.py
@@ -343,21 +415,26 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
 
 ## Open, in this order
 
-1. On the goggle (only by its owner, never flashed without asking): see 3. below and phase 4's "Not testable".
-2. A decision for the owner: ripples' `test_dvr_naming.c` does not build on glibc; fix it here (it is ripples'
+1. **On the owner's goggle** (only by its owner, never flashed without asking): the final juricabi.2 image, with
+   what has not run there yet (section "juricabi.2"): arm and disarm, fast switch changes, a card pulled right
+   after a stop, a start with no card. Then the tag `v1.2.2-juricabi.2` is pushed and the pre-release made.
+2. The goggle's backpack still runs the debug build of 1.5.9 used to find the lost commands; the clean 1.5.9
+   goes back on it.
+3. Not explained: the owner's ESP32-C3 backpack on an Orqa goggle receives the same radio's commands with Telem
+   Ratio Std; the HDZero goggle's built-in ESP32 does not. Not tested: 500 Hz, Race, other goggles. A fix on the
+   radio's side for everyone (the TX backpack sending a command again when no acknowledgement came) would be
+   ExpressLRS's.
+4. A recording stopped within a second of its start takes ripples' recorder up to 3 s to stop (the owner's
+   `dvr_dbg.log`); the goggle waits for it. Not looked into.
+5. A decision for the owner: ripples' `test_dvr_naming.c` does not build on glibc; fix it here (it is ripples'
    test) or leave it to ripples.
-3. On the goggle (only by its owner, never flashed without asking): everything of docs/module-bay.md, "Untested
-   on hardware", now on ripples' firmware; the order of module-bay-mod-safety.md (Check Pins with Module None
-   first); Stream Audio (docs/live-audio.md section 4); the Audio page (docs/audio.md, "Testing on a goggle":
-   ripples' rows, playback and test buttons as before, the extras); HDMI audio only after the read-only probe
-   (docs/hdmi-audio.md section 7).
-4. Known and left as it is: a goggle with a legacy `/data/confs/record.conf` streams without audio (rtspLive reads
+6. On the goggle, still untested: everything of docs/module-bay.md, "Untested on hardware"; the order of
+   module-bay-mod-safety.md (Check Pins with Module None first); Stream Audio (docs/live-audio.md section 4);
+   HDMI audio only after the read-only probe (docs/hdmi-audio.md section 7).
+7. Known and left as it is: a goggle with a legacy `/data/confs/record.conf` streams without audio (rtspLive reads
    that file, the WiFi page writes the app's; the same on `all`).
-5. (`t_kill.sh` measures on the recorder's log clock since phase 4.)
-6. From phase 4, for the owner: (a) done for the pre-release: `utilities/probe/hdmi_audio_test.sh` runs its part A
-   (PH1-PH3 and the IT66121 for the tone) only with the probe's GO for this board, by the boot step's rule. (b) A
-   `[mixer]` written by c3e0860 (never released) has no `record_source` / `record_live` and is read like one of
-   all's firmware. (c) A board whose id cannot be read is `unknown`: its GO counts on any goggle without
-   a readable id (then the GO binds only to the SD card). (d) From all's firmware, DVR Playback follows all's
-   `playback` only roughly (all's DAC was 6 dB lower). (e) The busy message comes after the capture failed; the test
-   cannot know in advance whether a client streams.
+8. From phase 4, for the owner: (b) a `[mixer]` written by c3e0860 (never released) has no `record_source` /
+   `record_live` and is read like one of all's firmware. (c) A board whose id cannot be read is `unknown`: its GO
+   counts on any goggle without a readable id (then the GO binds only to the SD card). (d) From all's firmware,
+   DVR Playback follows all's `playback` only roughly (all's DAC was 6 dB lower). (e) The busy message comes after
+   the capture failed; the test cannot know in advance whether a client streams.

@@ -590,9 +590,14 @@ def test_settings(h):
         again = gets(queries)
         # (a headphone level changed: the headphones from boot on; Headphone Volume leaves A/V In)
         want_again = dict(want, live_audio_volume=8, hdmi=2, phones_at_boot=1)
+        file_source = section(after, "record").get("audio_source")
         if lost or kept.get("version") != VERSION or "live_audio_volume=8" not in after or kept.get("hdmi") != "2" \
                 or "rec_mix" in kept:
             fail(test, f"after a change: all's keys changed or lost {lost}, [mixer] {kept}")
+        elif file_source != str(want_ripples["audio_source"]):
+            # (stock ripples, flashed back, reads this key: the Audio Source the page showed)
+            fail(test, f"after a change: [record] audio_source={file_source} in the file, "
+                       f"want {want_ripples['audio_source']} as the page shows")
         elif again != want_again:
             fail(test, f"after a change and a restart: {again}, want {want_again}")
         else:
