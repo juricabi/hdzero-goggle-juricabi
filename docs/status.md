@@ -4,8 +4,9 @@ juricabi's firmware (version `1.2.2-juricabi.2`) carries this project's addition
 firmware 1.2.2** (LVTY-AI/hdzero-goggle, the release: tag `ripples-v1.2.2`, 3f0461f, "1.2.2-ripples", MIT, by
 JustinRipley), which the owner prefers as the base. ripples' history is upstream HDZero's with rewritten hashes (no
 merge base with upstream a85841d), so the additions are **ported** from `all` (082b2f5), not merged.
-**juricabi.1 and test images of juricabi.2 ran on the owner's Goggle 1** (section "juricabi.2": what ran there
-and what has not yet).
+**juricabi.2 runs on the owner's Goggle 1** (the final image, flashed on 2026-11-20; the owner's verdict: all
+good). Section "juricabi.2" has what was found there, what was checked and what was not. The Goggle 2 and BoxPro
+images are built from the same code and have not run on hardware.
 
 History: until 2026-11-19 this work was called ripples-all, on a branch of that name in juricabi/hdzero-goggle;
 since then it is juricabi's firmware, https://github.com/juricabi/hdzero-goggle-juricabi. Phases 1 to 4 and
@@ -78,10 +79,12 @@ What the owner found with juricabi.1 and the test images on the Goggle 1, the ca
   firmware. **Channel control on analog** works only with the module bay under control (3-wire mod, Module =
   rapidFIRE, WiFi off), as ripples does on the Goggle 1.
 
-**On the owner's Goggle 1 so far**: test images e2d88c7 and 9a6ee17 (the new Audio page; the DVR following the
-switch, exact delays, no fixed 2 s wait; with Telem Ratio 1:16 or 1:32 no command lost). **Not yet run on a goggle**:
-everything after 9a6ee17 (a failed start, the retry back-off, the start waiting for an unfinished stop, the sync
-after a clip, `dvr_dbg.log` following Logging, Clear DVR Folder's check and the thumbnail copies).
+**On the owner's Goggle 1**: test images e2d88c7 and 9a6ee17 (the new Audio page; the DVR following the switch,
+exact delays, no fixed 2 s wait; with Telem Ratio 1:16 or 1:32 no command lost), then on 2026-11-20 the final
+image (the tag `v1.2.2-juricabi.2`, 1732881), with the owner's verdict "all good". **Not checked one by one on
+a goggle** (no log of the final image was read): a failed start and the retry back-off, the start waiting for an
+unfinished stop, the sync after a clip (a card pulled right after a stop), `dvr_dbg.log` following Logging,
+Clear DVR Folder's check and the thumbnail copies.
 
 Tests adapted to the 1.2.2 base: the live-stream audio suite's `t_pause.sh` stops the live encoding with the goggle
 message 1.2.2's app sends (`LIVE_cmdSTOP`) instead of ripples' newer control queue; `t_snapshot.sh` and `ctl_conf`
@@ -101,7 +104,8 @@ models the juricabi.2 page.
 | live-stream audio (`utilities/dev/run_live.sh all`) | all passed (builds `src/record/main.c` with the sync after a clip) |
 | HDMI C tests (`it66121_seq_test.sh`, `it66021_edid_test.sh`, `pcmbridge_test.sh`, `hdmi_boot_test.sh`) | not run again on the 1.2.2 base (those drivers are the same in 3f0461f and 4fbb865) |
 | emulator | the Audio page of e2d88c7 looked through (key scripts); not run again after it |
-| the waits for the recorder in `dvr.c`, the sync after a clip, `dvr_dbg.log` following Logging | no host test; not yet run on a goggle |
+| the waits for the recorder in `dvr.c`, the sync after a clip, `dvr_dbg.log` following Logging | no host test; in the final image on the owner's Goggle 1, not checked one by one |
+| at the tag (1732881: Clear DVR Folder's check, the thumbnail copies) | ripples' tests as above; the counting function, cut from the source, against a folder with clips, an empty one, one with only a dot file and a missing one; the emulator starts and walks the menu (Goggle 1); the three images build with no compiler warning. The other suites ran at 1965cc6 and do not cover the two files changed. A read-only card cannot be made on the PC |
 
 ## Phases
 
@@ -424,16 +428,18 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
 
 ## Open, in this order
 
-1. **On the owner's goggle** (only by its owner, never flashed without asking): the final juricabi.2 image, with
-   what has not run there yet (section "juricabi.2"): arm and disarm, fast switch changes, a card pulled right
-   after a stop, a start with no card. Then the tag `v1.2.2-juricabi.2` is pushed and the pre-release made.
+1. Done 2026-11-20: the final juricabi.2 image is on the owner's Goggle 1 (the owner's verdict: all good), the
+   tag `v1.2.2-juricabi.2` is pushed and the pre-release made. Still worth a look there, one by one, with Logging
+   On (section "juricabi.2"): a card pulled right after a stop, a start with no card or with a card that cannot
+   be written, Clear DVR Folder, and `dvr_dbg.log` staying as it is with Logging Off. The Goggle 2 and BoxPro
+   images have not run on hardware.
 2. Done 2026-11-20: the goggle's backpack runs the unchanged 1.5.9 again (its page reports 1.5.9 (437a4f), the
    tag's commit); the debug build used to find the lost commands is off it.
 3. The owner's ESP32-C3 backpack on an Orqa goggle receives the same radio's commands with Telem Ratio Std; the
    HDZero goggle's built-in ESP32 does not. The owner's explanation: the antenna (a proper one on the C3 board,
    the goggle's ESP32 inside the housing). Not measured. Not tested: 500 Hz, Race, other goggles. A fix on the
-   radio's side for everyone (the TX backpack sending a command again when no acknowledgement came) would be
-   ExpressLRS's.
+   radio's side for everyone (the TX backpack sending a command again when no acknowledgement came; docs/dvr.md
+   has where) would be ExpressLRS's. The owner stays with Telem Ratio 1:32 and does not want it built here.
 4. A recording stopped within a second of its start takes ripples' recorder up to 3 s to stop (the owner's
    `dvr_dbg.log`); the goggle waits for it. Not looked into.
 5. A decision for the owner: ripples' `test_dvr_naming.c` does not build on glibc; fix it here (it is ripples'

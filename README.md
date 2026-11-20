@@ -6,7 +6,8 @@ plus juricabi's changes, number 2. It is **not** an official ripples or HDZero r
 1.2.2 does not cover these additions. Goggle 1, Goggle 2 and BoxPro.
 
 **Status: pre-release.** It passed its host tests and the emulator on all three targets. juricabi.1 ran on a
-Goggle 1; juricabi.2 addresses what that showed and is being tried on that goggle now
+Goggle 1; juricabi.2 addresses what that showed and runs on that goggle now (the Goggle 2 and BoxPro images
+have not run on hardware)
 ([docs/status.md](docs/status.md)). Flash it only if you can go back ([docs/first-flash.md](docs/first-flash.md)).
 
 ## What it adds to ripples 1.2.2
