@@ -420,8 +420,9 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
    after a stop, a start with no card. Then the tag `v1.2.2-juricabi.2` is pushed and the pre-release made.
 2. The goggle's backpack still runs the debug build of 1.5.9 used to find the lost commands; the clean 1.5.9
    goes back on it.
-3. Not explained: the owner's ESP32-C3 backpack on an Orqa goggle receives the same radio's commands with Telem
-   Ratio Std; the HDZero goggle's built-in ESP32 does not. Not tested: 500 Hz, Race, other goggles. A fix on the
+3. The owner's ESP32-C3 backpack on an Orqa goggle receives the same radio's commands with Telem Ratio Std; the
+   HDZero goggle's built-in ESP32 does not. The owner's explanation: the antenna (a proper one on the C3 board,
+   the goggle's ESP32 inside the housing). Not measured. Not tested: 500 Hz, Race, other goggles. A fix on the
    radio's side for everyone (the TX backpack sending a command again when no acknowledgement came) would be
    ExpressLRS's.
 4. A recording stopped within a second of its start takes ripples' recorder up to 3 s to stop (the owner's

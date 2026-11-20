@@ -89,8 +89,11 @@ What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem R
   and a 64 ms grid took its place (the owner's log of 2026-11-20). The cost is about 6 % of the control
   packets (250 -> 234 a second).
 
-Not explained: the owner's ESP32-C3 backpack on an Orqa goggle works with Std on the same radio. Not
-tested: 500 Hz, Race (no telemetry slot at all while armed), other goggles.
+The owner's ESP32-C3 backpack on an Orqa goggle works with Std on the same radio, so the difference is on
+the receiving side. The owner's explanation: the antenna (the C3 board has a proper one, the HDZero goggle's
+ESP32 sits inside the housing), so the C3 still hears the backpack's 90 mW next to the ELRS transmitter's
+1 W. It fits the logs; it has not been measured. Not tested: 500 Hz, Race (no telemetry slot at all while
+armed), other goggles.
 
 A command that is lost all the same leaves the DVR in the old state until the next switch change (in the
 log: a start after a start, or a stop after a stop).
