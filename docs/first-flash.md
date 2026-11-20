@@ -1,7 +1,7 @@
 # First flash: the order that risks least (juricabi's firmware; Goggle 1 first)
 
 This page is for flashing juricabi's firmware (ripples' firmware 1.2.2 with juricabi's additions, version
-`1.2.2-juricabi.2`, docs/status.md) onto an HDZero goggle for the first time, checking it, and going back to ripples' official
+`1.2.2-juricabi.3`, docs/status.md) onto an HDZero goggle for the first time, checking it, and going back to ripples' official
 1.2.2 if you want to. It is written for the original HDZero Goggle (Goggle 1); the notes marked **Goggle 2** and
 **BoxPro** say where those differ. juricabi.1 and ripples' 1.2.2 have been flashed this way on a Goggle 1, back and
 forth; the Goggle 2 and BoxPro notes are not tried. The menu texts and the file handling below are read from ripples' code (`src/ui/page_version.c`, `mkapp/app/script/update_goggle.sh`,
@@ -13,9 +13,9 @@ The images of this release (the repository's Releases page) are:
 
 | target | image |
 |---|---|
-| Goggle 1 | `HDZERO_GOGGLE-77-206-1.2.2-juricabi.2.bin` |
-| Goggle 2 | `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.2.bin` |
-| BoxPro | `HDZERO_BOXPRO-77-211-1.2.2-juricabi.2.bin` |
+| Goggle 1 | `HDZERO_GOGGLE-77-206-1.2.2-juricabi.3.bin` |
+| Goggle 2 | `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.3.bin` |
+| BoxPro | `HDZERO_BOXPRO-77-211-1.2.2-juricabi.3.bin` |
 
 each with a `.sha256` file next to it. (A build that is not at a git tag appends `-<commit>`.)
 
@@ -64,7 +64,7 @@ case. For this build's image, compare with the first 64 characters of its `.sha2
 the file name), or let PowerShell compare:
 
 ```
-(Get-FileHash .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.2.bin -Algorithm SHA256).Hash -eq (Get-Content .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.2.bin.sha256).Split(' ')[0]
+(Get-FileHash .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.3.bin -Algorithm SHA256).Hash -eq (Get-Content .\HDZERO_GOGGLE-77-206-1.2.2-juricabi.3.bin.sha256).Split(' ')[0]
 ```
 
 It must print `True`. If a hash differs, download the file again; never flash a file whose hash does not match.
@@ -117,8 +117,8 @@ With one image on the card there is nothing to choose wrongly.
 5. When the script reports "all done", the goggle shows **"Update complete"**: "Goggle update completed
    successfully. Please repower goggle now.", beeps three times and ignores the buttons. Power off, wait 5 s,
    power on.
-6. Main menu > Firmware: Current Version now reads `app: juricabi.2 ripples 1.2.2 rx0: … rx1: … va: …` (the
-   version file of this build is `1.2.2-juricabi.2`; the row was looked at in the emulator, with that version
+6. Main menu > Firmware: Current Version now reads `app: juricabi.3 ripples 1.2.2 rx0: … rx1: … va: …` (the
+   version file of this build is `1.2.2-juricabi.3`; the row was looked at in the emulator, with that version
    file, on all three targets).
 7. Take the image off the card's root again, so that the Firmware page does not offer it later.
 
@@ -164,7 +164,7 @@ If something that worked with ripples' 1.2.2 does not work now, go back (section
   (experimental); the page scrolls. ripples' Audio Source and Live Volume rows are gone (their keys stay).
   docs/audio.md.
 * WiFi Module > System: a new **Stream Audio** row (Off). docs/live-audio.md.
-* Firmware > Current Version shows `juricabi.2 ripples 1.2.2` (section 3).
+* Firmware > Current Version shows `juricabi.3 ripples 1.2.2` (section 3).
 * `setting.ini` is not changed at start-up; the first change on the Audio page adds a `[mixer]` section.
 
 ## 5. Then the Audio page
