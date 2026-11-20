@@ -4,11 +4,14 @@ juricabi's firmware (version `1.2.2-juricabi.3`) carries this project's addition
 firmware 1.2.2** (LVTY-AI/hdzero-goggle, the release: tag `ripples-v1.2.2`, 3f0461f, "1.2.2-ripples", MIT, by
 JustinRipley), which the owner prefers as the base. ripples' history is upstream HDZero's with rewritten hashes (no
 merge base with upstream a85841d), so the additions are **ported** from `all` (082b2f5), not merged.
-**juricabi.2 runs on the owner's Goggle 1** (the final image, flashed on 2026-11-20; the owner's verdict: all
-good). Section "juricabi.2" has what was found there, what was checked and what was not. **juricabi.3** (section
-"juricabi.3") is juricabi.2 with the fixes of a code review and four of ripples' fixes; it had not run on a
-goggle when it was released. The Goggle 2 and BoxPro
+**juricabi.3 runs on the owner's Goggle 1** (flashed and tested by the owner on 2026-11-20; the verdict: good).
+It is juricabi.2 with the fixes of a code review and four of ripples' fixes (section "juricabi.3"); it had not
+run on a goggle when it was released. juricabi.2 ran on that goggle before it (the owner's verdict: all good);
+section "juricabi.2" has what was found there, what was checked and what was not. The Goggle 2 and BoxPro
 images are built from the same code and have not run on hardware.
+
+**Finished for now (owner, 2026-11-20).** The edge cases listed under "Open" are not tested and will not be
+soon, and the owner will not do the module bay mod: the module bay code stays untested on hardware.
 
 History: until 2026-11-19 this work was called ripples-all, on a branch of that name in juricabi/hdzero-goggle;
 since then it is juricabi's firmware, https://github.com/juricabi/hdzero-goggle-juricabi. Phases 1 to 4 and
@@ -34,7 +37,7 @@ Local worktree on the developer's machine (WSL): `/root/hdz/goggle-ripples` (bra
 
 juricabi.2 plus what a review of its changes found, plus four of ripples' fixes from its `main`. Released on
 2026-11-20 as the only release (juricabi.2's release page was taken offline); it had not run on a goggle when it
-was released.
+was released. The owner flashed it on the Goggle 1 the same day and tested it: good.
 
 * **From the review** (every code change of juricabi.2 since the last independent review was read; the DVR and
   the recorder line by line, the Audio page more quickly: it has the strongest tests):
@@ -468,12 +471,12 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
 
 ## Open, in this order
 
-1. **juricabi.3 on the owner's goggle**: released on 2026-11-20 at the owner's word, not yet flashed there.
-   (juricabi.2: on the owner's Goggle 1 since 2026-11-20, the owner's verdict: all good; its tag
-   `v1.2.2-juricabi.2` stays, its release page was taken offline when juricabi.3 came.) Still worth a look there, one by one, with Logging
-   On (section "juricabi.2"): a card pulled right after a stop, a start with no card or with a card that cannot
-   be written, Clear DVR Folder, and `dvr_dbg.log` staying as it is with Logging Off. The Goggle 2 and BoxPro
-   images have not run on hardware.
+1. Done 2026-11-20: **juricabi.3 is on the owner's Goggle 1**, flashed and tested by the owner, the verdict: good.
+   (juricabi.2 ran there before it, the owner's verdict: all good; its tag `v1.2.2-juricabi.2` stays, its release
+   page was taken offline when juricabi.3 came.) Not tested one by one, and the owner will not test them soon
+   (section "juricabi.2"; with Logging On): a card pulled right after a stop, a start with no card or with a card
+   that cannot be written, Clear DVR Folder, and `dvr_dbg.log` staying as it is with Logging Off. The Goggle 2 and
+   BoxPro images have not run on hardware.
 2. Done 2026-11-20: the goggle's backpack runs the unchanged 1.5.9 again (its page reports 1.5.9 (437a4f), the
    tag's commit); the debug build used to find the lost commands is off it.
 3. The owner's ESP32-C3 backpack on an Orqa goggle receives the same radio's commands with Telem Ratio Std; the
@@ -485,8 +488,9 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
    `dvr_dbg.log`); the goggle waits for it. Not looked into.
 5. A decision for the owner: ripples' `test_dvr_naming.c` does not build on glibc; fix it here (it is ripples'
    test) or leave it to ripples.
-6. On the goggle, still untested: everything of docs/module-bay.md, "Untested on hardware"; the order of
-   module-bay-mod-safety.md (Check Pins with Module None first); Stream Audio (docs/live-audio.md section 4);
+6. On the goggle, still untested: everything of docs/module-bay.md, "Untested on hardware" (the owner will not do
+   the module bay mod, 2026-11-20, so this stays untested; for anyone who does: the order of
+   module-bay-mod-safety.md, Check Pins with Module None first); Stream Audio (docs/live-audio.md section 4);
    HDMI audio only after the read-only probe (docs/hdmi-audio.md section 7).
 7. Known and left as it is: a goggle with a legacy `/data/confs/record.conf` streams without audio (rtspLive reads
    that file, the WiFi page writes the app's; the same on `all`).
