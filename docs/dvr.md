@@ -73,9 +73,10 @@ receives it. The owner's ESP32-C3 backpack on another goggle loses commands the 
 firmware nor the HDZero goggle causes it. The Telem Ratio is not the cause either: even with telemetry Off the
 backpack works.
 
-If DVR commands get lost while you test on the bench, check this first: is a quad connected, and is the
-transmitter at 1000 mW? Nothing in the goggle's firmware can make up for a command that never reaches the
-goggle.
+**With the quad connected there is no problem at all.** With no quad, keep the transmitter at a normal power,
+such as 100 mW: that avoids it too. So if DVR commands get lost while you test on the bench, check this first:
+is a quad connected, and is the transmitter at 1000 mW? Nothing in the goggle's firmware can make up for a
+command that never reaches the goggle.
 
 Where a real fix would belong: the radio's backpack chip. ExpressLRS Backpack 1.5.9 (`src/Tx_main.cpp`,
 `sendMSPViaEspnow()`) hands each command to ESP-NOW once, ignores the result and registers no send
@@ -89,7 +90,7 @@ Until 2026-11-20 this page, the README and the release notes advised ExpressLRS 
 instead of Std. That advice is withdrawn: the Telem Ratio is not the cause. The tests behind it are kept as
 they were made. They fit the cause above: the backpack's packet got through only in the transmitter's
 telemetry slots, while the transmitter was silent. One result does not fit and was not checked again: with Std
-at 100 mW commands were lost too.
+at 100 mW commands were lost too, while in the owner's later use at 100 mW none is lost.
 
 | at 250 Hz (a packet every 4 ms) | a pause every | DVR commands |
 |---|---|---|

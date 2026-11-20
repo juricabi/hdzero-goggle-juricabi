@@ -89,7 +89,8 @@ What the owner found with juricabi.1 and the test images on the Goggle 1, the ca
     the recorder's status instead of 2 s.
   * Cause **outside the goggle**, found by the owner on 2026-11-20: with no quad connected and the ELRS
     transmitter at 1000 mW, the command the radio's backpack sends over ESP-NOW gets lost after a few arms (the
-    transmitter overwhelms it). The owner's ESP32-C3 backpack on another goggle shows the same. The Telem Ratio
+    transmitter overwhelms it); with the quad connected, or at a normal power such as 100 mW, none is lost. The
+    owner's ESP32-C3 backpack on another goggle shows the same. The Telem Ratio
     is not the cause (even with telemetry Off the backpack works): the earlier advice, Telem Ratio 1:16 or 1:32,
     is withdrawn. The earlier tests (a debug build of backpack 1.5.9 logging into `HDZGOGGLE.log`: commands came
     only on the 256 ms telemetry grid; with 1:16, 24 of 24 arrived) are in docs/dvr.md, "Earlier tests".

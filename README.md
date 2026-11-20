@@ -20,8 +20,9 @@ and have not run on hardware ([docs/status.md](docs/status.md)). Flash it only i
   also after a menu, a channel or a source switch; disarmed, Record Mode Auto does not start a new recording;
   the DVR button wins. [docs/dvr.md](docs/dvr.md)
   **A DVR command that never arrives:** with no quad connected and the ELRS transmitter at 1000 mW, the
-  radio's backpack command gets lost after a few arms (the transmitter overwhelms ESP-NOW). The Telem Ratio
-  does not matter. [docs/dvr.md](docs/dvr.md)
+  radio's backpack command gets lost after a few arms (the transmitter overwhelms ESP-NOW). With the quad
+  connected, or the transmitter at a normal power such as 100 mW, there is no problem; the Telem Ratio does
+  not matter. [docs/dvr.md](docs/dvr.md)
 * **Module bay control**: tune an analog module in the bay from the goggle (Switch, rapidFIRE, SteadyView,
   SteadyView X), also from the radio's channel commands. Needs the 3-wire bay mod; with Module = None (the
   default) the goggle leaves the bay pins alone.
