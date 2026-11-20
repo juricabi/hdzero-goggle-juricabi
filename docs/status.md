@@ -418,8 +418,8 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
 1. **On the owner's goggle** (only by its owner, never flashed without asking): the final juricabi.2 image, with
    what has not run there yet (section "juricabi.2"): arm and disarm, fast switch changes, a card pulled right
    after a stop, a start with no card. Then the tag `v1.2.2-juricabi.2` is pushed and the pre-release made.
-2. The goggle's backpack still runs the debug build of 1.5.9 used to find the lost commands; the clean 1.5.9
-   goes back on it.
+2. Done 2026-11-20: the goggle's backpack runs the unchanged 1.5.9 again (its page reports 1.5.9 (437a4f), the
+   tag's commit); the debug build used to find the lost commands is off it.
 3. The owner's ESP32-C3 backpack on an Orqa goggle receives the same radio's commands with Telem Ratio Std; the
    HDZero goggle's built-in ESP32 does not. The owner's explanation: the antenna (a proper one on the C3 board,
    the goggle's ESP32 inside the housing). Not measured. Not tested: 500 Hz, Race, other goggles. A fix on the
