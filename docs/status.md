@@ -363,6 +363,9 @@ docs/hdmi-audio.md), and whether PH1-PH3 reach the IT66121 and nothing else on e
 
 ## Pre-release v1.2.2-juricabi.1
 
+Its release page was taken offline on 2026-11-20, when juricabi.2 became the release (kept as a draft); the tag
+`v1.2.2-juricabi.1` and the branch `juricabi.1` stay.
+
 The first public pre-release, marked untested on hardware: the code of phase 4 (b02cc20) with the tone test's
 gate (below), the README, docs/first-flash.md, the new name and version.
 
@@ -429,7 +432,8 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
 ## Open, in this order
 
 1. Done 2026-11-20: the final juricabi.2 image is on the owner's Goggle 1 (the owner's verdict: all good), the
-   tag `v1.2.2-juricabi.2` is pushed and the pre-release made. Still worth a look there, one by one, with Logging
+   tag `v1.2.2-juricabi.2` is pushed and the release made (published as a pre-release, made the release the
+   same day at the owner's word). Still worth a look there, one by one, with Logging
    On (section "juricabi.2"): a card pulled right after a stop, a start with no card or with a card that cannot
    be written, Clear DVR Folder, and `dvr_dbg.log` staying as it is with Logging Off. The Goggle 2 and BoxPro
    images have not run on hardware.
