@@ -84,6 +84,12 @@ For other packet rates the same sum should hold (a pause every 128 ms or less; a
 only 250 Hz was tested. Nothing in the goggle's firmware can make up for it: a lost command never reaches
 the goggle.
 
+Where a real fix would belong: the radio's backpack chip. ExpressLRS Backpack 1.5.9 (`src/Tx_main.cpp`,
+`sendMSPViaEspnow()`) hands each command to ESP-NOW once, ignores the result and registers no send
+callback, and ExpressLRS sends each switch change once. Nobody notices a command the goggle did not
+acknowledge. Resending the last recording state until it is acknowledged would deliver it in the next
+pause at any Telem Ratio. Not written, not tested.
+
 What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem Ratio Std):
 
 * About 1 in 4 commands was missing (a start after a start, a stop after a stop), whatever the goggle
