@@ -296,7 +296,7 @@ static bool aidev_heldByOthers(RecordContext_t *recCtx, AiUser_e self) {
  */
 static char liveConfFile[MAX_pathLEN];
 
-static void record_closeFile(RecordContext_t *recCtx, const char *reason) {
+static void record_closeFile(RecordContext_t *recCtx, const char *reason, bool recordingEnds) {
     char filePath[256] = "";
     snprintf(filePath, sizeof(filePath), "%s", recCtx->ff->ofmtContext->url);
     uint64_t bytes = recCtx->ff->nbTotalSize;
@@ -306,10 +306,16 @@ static void record_closeFile(RecordContext_t *recCtx, const char *reason) {
                 (unsigned long long)bytes);
     FFPackCloseResult_t result = ffpack_close(recCtx->ff);
     recCtx->ff = NULL;
-    // juricabi: onto the card now. Closing left the clip's end and its directory entry in the kernel's
-    // write cache for up to half a minute (the app's next start synced them): a card pulled, or the goggle
-    // switched off, soon after a stop lost the clip (0 bytes, its data as lost chains: the owner's card).
-    sync();
+    // juricabi: onto the card now, when the recording ends. Closing left the clip's end and its directory
+    // entry in the kernel's write cache for up to half a minute (the app's next start synced them): a card
+    // pulled, or the goggle switched off, soon after a stop lost the clip (0 bytes, its data as lost
+    // chains: the owner's card).
+    // Not at a rollover to the next file: the caller holds the lock the frame callbacks wait for, and a
+    // sync of everything cached would hold the running recording up for as long as the card takes. The
+    // recording goes on and the card stays in: the kernel writes the finished file as before, and the
+    // stop's sync covers it at the latest.
+    if (recordingEnds)
+        sync();
     rec_dbg_log("record_close end reason=%s file='%s' flush=%d trailer=%d io=%d",
                 reason, filePath, result.flush, result.trailer, result.io);
 }
@@ -328,7 +334,7 @@ void record_stop(RecordContext_t *recCtx) {
 
     pthread_mutex_lock(&recCtx->mutex);
     if (recCtx->ff != NULL) {
-        record_closeFile(recCtx, "stop");
+        record_closeFile(recCtx, "stop", true);
     }
     recCtx->stateGoing = REC_statStop;
     pthread_mutex_unlock(&recCtx->mutex);
@@ -566,7 +572,7 @@ bool record_pack(RecordContext_t *recCtx) {
     }
 
     pthread_mutex_lock(&recCtx->mutex);
-    record_closeFile(recCtx, "segment_rollover");
+    record_closeFile(recCtx, "segment_rollover", false);
     recCtx->nbFramesTotal = 0;
     recCtx->nbAudioFrames = 0;
     recCtx->ptsBase = 0;
@@ -675,7 +681,7 @@ failed:
     LOGE("create %s failed", sFile);
     remove(sFile);
     if (recCtx->ff != NULL) {
-        record_closeFile(recCtx, "segment_start_failed");
+        record_closeFile(recCtx, "segment_start_failed", true);
     }
     pthread_mutex_unlock(&recCtx->mutex);
     return true;
