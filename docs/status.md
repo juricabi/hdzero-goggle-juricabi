@@ -1,11 +1,13 @@
 # Status of juricabi's firmware, and how to continue (2026-11-20)
 
-juricabi's firmware (version `1.2.2-juricabi.2`) carries this project's additions on top of **ripples' custom
+juricabi's firmware (version `1.2.2-juricabi.3`) carries this project's additions on top of **ripples' custom
 firmware 1.2.2** (LVTY-AI/hdzero-goggle, the release: tag `ripples-v1.2.2`, 3f0461f, "1.2.2-ripples", MIT, by
 JustinRipley), which the owner prefers as the base. ripples' history is upstream HDZero's with rewritten hashes (no
 merge base with upstream a85841d), so the additions are **ported** from `all` (082b2f5), not merged.
 **juricabi.2 runs on the owner's Goggle 1** (the final image, flashed on 2026-11-20; the owner's verdict: all
-good). Section "juricabi.2" has what was found there, what was checked and what was not. The Goggle 2 and BoxPro
+good). Section "juricabi.2" has what was found there, what was checked and what was not. **juricabi.3** (section
+"juricabi.3") is juricabi.2 with the fixes of a code review and four of ripples' fixes; it had not run on a
+goggle when it was released. The Goggle 2 and BoxPro
 images are built from the same code and have not run on hardware.
 
 History: until 2026-11-19 this work was called ripples-all, on a branch of that name in juricabi/hdzero-goggle;
@@ -27,6 +29,41 @@ module bay; its docs/status.md has the history and the reviews), stays in jurica
 
 Local worktree on the developer's machine (WSL): `/root/hdz/goggle-ripples` (branch `juricabi-122`, pushed as
 `main`; the local branch `juricabi` there is juricabi.1's).
+
+## juricabi.3
+
+juricabi.2 plus what a review of its changes found, plus four of ripples' fixes from its `main`. Released on
+2026-11-20 as the only release (juricabi.2's release page was taken offline); it had not run on a goggle when it
+was released.
+
+* **From the review** (every code change of juricabi.2 since the last independent review was read; the DVR and
+  the recorder line by line, the Audio page more quickly: it has the strongest tests):
+  * The recorder wrote a clip to the card (`sync()`) also at a rollover to the next file (every 10 minutes or
+    1800 MB by record.conf), under the lock the frame callbacks take: a running recording waited for the card.
+    Now only when the recording ends. Found by reading; not seen on a goggle.
+  * A stop did not end a start that waited for a card that was in but not ready yet (ripples' code): the start
+    ran once the card was ready, after a disarm, a menu or the button had said stop. Now a stop ends it.
+  * Left as it is: a recorder stop of over 8 s can make the next start look like a recording that ended (the
+    goggle stops it and, armed, starts again).
+* **From ripples' `main`** (30 commits after the 1.2.2 release, 13 of them merges), cherry-picked with `-x`:
+  * 07afcb0: Playback no longer crashes on a clip with a one-letter name.
+  * d2edd60: the Clock page's year list no longer overruns its buffer.
+  * 5709094: a possible deadlock at a recording's start (the OSD readback took the hardware lock under the DVR
+    lock; the camera-mode detection takes them the other way round).
+  * ad912be: Format and Repair SD Card wait for the recorder to exit (one still closing its file left the DVR
+    without a recorder until a restart).
+  * (2821180, updates from the SD card only, was taken for juricabi.2.)
+* **Not taken from ripples' `main`**:
+  * the deferred DVR transitions (e41a0c9) and what builds on them (bb72c0b, 5a60be6, 4eb9217, 2d32362, e9ea612,
+    1666118, b7f025d, 0ce3b14, eff436a): they bring the yellow "DVR: waiting for recorder to finish" that
+    juricabi.2 left behind;
+  * dda6bc0: it repairs something only that rework broke (the 1.2.2 code has the Box Pro behaviour);
+  * the logging rework (bc2efc4, d6b6862): it changes `lib/log` under the `dvr_dbg.log` gating, for no gain
+    with Logging off.
+  GitHub keeps showing the fork as "30 commits behind LVTY-AI/hdzero-goggle:main": it counts commits by id, and
+  a cherry-pick has a new one.
+
+Results of juricabi.3 (all on the PC, on the tree the images were built from): ripples' tests as for juricabi.2 (all rc 0 but `record`: rc 2, `test_dvr_naming` does not build on glibc; `video` now with ripples' OSD readback check); `test/dvr` passes; the module bay tests: exit 0, no failed check; `test_mixer.py`: all passed; the probe kit: rc 0; the live-stream audio suite (it builds the recorder): rc 0; the emulator builds for all three targets and walks the smoke script; `check_version.py`: all passed; the three images build with no compiler warning. The mutants were not run again (the code they cover did not change). No host test covers the two review fixes themselves.
 
 ## juricabi.2
 
@@ -431,9 +468,9 @@ RTSPLIVE=arm ARM_RTSPLIVE=<build>/goggle2/rtspLive utilities/dev/run_live.sh t_e
 
 ## Open, in this order
 
-1. Done 2026-11-20: the final juricabi.2 image is on the owner's Goggle 1 (the owner's verdict: all good), the
-   tag `v1.2.2-juricabi.2` is pushed and the release made (published as a pre-release, made the release the
-   same day at the owner's word). Still worth a look there, one by one, with Logging
+1. **juricabi.3 on the owner's goggle**: released on 2026-11-20 at the owner's word, not yet flashed there.
+   (juricabi.2: on the owner's Goggle 1 since 2026-11-20, the owner's verdict: all good; its tag
+   `v1.2.2-juricabi.2` stays, its release page was taken offline when juricabi.3 came.) Still worth a look there, one by one, with Logging
    On (section "juricabi.2"): a card pulled right after a stop, a start with no card or with a card that cannot
    be written, Clear DVR Folder, and `dvr_dbg.log` staying as it is with Logging Off. The Goggle 2 and BoxPro
    images have not run on hardware.
