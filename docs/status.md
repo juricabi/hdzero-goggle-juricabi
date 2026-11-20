@@ -363,7 +363,7 @@ docs/hdmi-audio.md), and whether PH1-PH3 reach the IT66121 and nothing else on e
 
 ## Pre-release v1.2.2-juricabi.1
 
-Its release page was taken offline on 2026-11-20, when juricabi.2 became the release (kept as a draft); the tag
+Its release page was removed on 2026-11-20, when juricabi.2 became the release and the only one; the tag
 `v1.2.2-juricabi.1` and the branch `juricabi.1` stay.
 
 The first public pre-release, marked untested on hardware: the code of phase 4 (b02cc20) with the tone test's
