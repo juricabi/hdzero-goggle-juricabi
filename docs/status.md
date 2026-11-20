@@ -48,9 +48,11 @@ What the owner found with juricabi.1 and the test images on the Goggle 1, the ca
     the recorder's status instead of 2 s.
   * Cause **outside the goggle**: about 1 switch change in 4 never reached the goggle's backpack chip, and the
     rest came on a 256.0 ms grid: the ELRS transmitter's telemetry cycle with Telem Ratio Std at 250 Hz. The
-    backpack's packet got through only while the transmitter listened. **Telem Ratio 1:16 on the radio**: 24 of
-    24 arrived. Found with a debug build of backpack 1.5.9 whose log goes into `HDZGOGGLE.log`; ruled out on the
-    way: head tracking, the goggle's WiFi, distance, WiFi power save on the chip.
+    backpack's packet got through only while the transmitter listened. **Telem Ratio 1:16 or 1:32 on the
+    radio**: with 1:16, 24 of 24 arrived; 1:32 works as well, also at 1 W, while 1:64 loses commands at 100 mW
+    too (the owner's tests with the unchanged backpack 1.5.9). The spacing of the telemetry slots decides it,
+    not the transmit power. Found with a debug build of backpack 1.5.9 whose log goes into `HDZGOGGLE.log`;
+    ruled out on the way: head tracking, the goggle's WiFi, distance, WiFi power save on the chip.
 * **The DVR started and stopped every second while armed** (one boot). Cause: the SD card's filesystem was
   damaged (below), the recorder could not write, every start failed, and the armed DVR retried every second.
   A start that does not bring the recorder to "recording" now counts as failed (logged with the reason), and
@@ -70,7 +72,7 @@ What the owner found with juricabi.1 and the test images on the Goggle 1, the ca
   rapidFIRE, WiFi off), as ripples does on the Goggle 1.
 
 **On the owner's Goggle 1 so far**: test images e2d88c7 and 9a6ee17 (the new Audio page; the DVR following the
-switch, exact delays, no fixed 2 s wait; with Telem Ratio 1:16 no command lost). **Not yet run on a goggle**:
+switch, exact delays, no fixed 2 s wait; with Telem Ratio 1:16 or 1:32 no command lost). **Not yet run on a goggle**:
 everything after 9a6ee17 (a failed start, the retry back-off, the start waiting for an unfinished stop, the sync
 after a clip, `dvr_dbg.log` following Logging).
 

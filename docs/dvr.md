@@ -69,6 +69,21 @@ position, however busy the goggle was meanwhile.
 **On the radio, ExpressLRS Lua: Telem Ratio 1:16 or 1:32 instead of Std.** With Std at 250 Hz or
 500 Hz about one DVR switch change in four never reaches the HDZero goggle.
 
+In short: the goggle's backpack chip receives a command only while the ELRS transmitter pauses to listen
+for telemetry, and the radio sends each switch change once and gives up after about 0.2 s (an estimate, see
+below). The Telem Ratio
+sets how far apart the pauses are (packet interval x ratio). It is a matter of timing, not of transmit power:
+
+| at 250 Hz (a packet every 4 ms) | a pause every | DVR commands |
+|---|---|---|
+| Std = 1:64 | 256 ms | about 1 in 4 lost, at 100 mW as at 1 W |
+| 1:32 | 128 ms | none lost, also at 1 W |
+| 1:16 | 64 ms | none lost |
+
+For other packet rates the same sum should hold (a pause every 128 ms or less; at 500 Hz that is 1:64);
+only 250 Hz was tested. Nothing in the goggle's firmware can make up for it: a lost command never reaches
+the goggle.
+
 What was found on the owner's Goggle 1 (backpack 1.5.9, radio at 250 Hz, Telem Ratio Std):
 
 * About 1 in 4 commands was missing (a start after a start, a stop after a stop), whatever the goggle
