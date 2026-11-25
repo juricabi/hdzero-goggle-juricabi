@@ -68,7 +68,7 @@ Results of juricabi.4 (on the PC):
 | check | result |
 |---|---|
 | `test_mixer.py`, all three targets | all passed. New: the watcher reads nothing while nothing can have changed the codec (after an apply's one pass, and after the boot daemon's window); a daemon start and the daemon running at boot are undone; a control no reset writes is found after an apply, a recheck and a daemon start. Against juricabi.3's mixer the idle test fails (488 controls read in 1.6 s) |
-| `mutants.py` | the quick pass's three mutants out (no quick pass), six for the new watcher in; run after the tag (below) |
+| `mutants.py` (`--jobs 4`, run on the tagged code right after the release) | 97 mutants, 0 survived. The quick pass's three mutants are out (no quick pass), six for the new watcher in; "reads the codec all the time" (juricabi.3's behaviour) is killed by the idle test with 1216 controls read in 1.6 s |
 | ripples' tests (`run_ripples_tests.sh`) | as for juricabi.3: all rc 0 but `record` (rc 2, `test_dvr_naming` does not build on glibc) |
 | emulator, all three targets | builds without a warning; the Firmware page shows `app: juricabi.4 ripples 1.2.2` (`keys/firmware_version.txt`, `EMU_APP_VERSION=1.2.2-juricabi.4`) |
 | `check_version.py`, with `--images` | all passed |
