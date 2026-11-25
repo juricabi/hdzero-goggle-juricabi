@@ -7,8 +7,9 @@ Each mutant is one small change to a copy of src/core/audio_mixer*.c; test_mixer
 the copy (--src). all's mutants (082b2f5) that still apply, the ones of all's reviews among them,
 and the ones of juricabi's own rules (ripples' controls, the settings both ways, hold), the fixes of
 the review of phase 3 (the held batch, holders, the timeslot volumes, the round trip through stock
-ripples), and juricabi.2's page (no linked rows, Record Level, the ADC keeping a source, the take-over
-of juricabi.1's Record Headphone Mix). Exit status 1 if a mutant survives (or the unmodified copy fails).
+ripples), juricabi.2's page (no linked rows, Record Level, the ADC keeping a source, the take-over
+of juricabi.1's Record Headphone Mix), and juricabi.4's watcher (the codec read only while something
+may have changed it). Exit status 1 if a mutant survives (or the unmodified copy fails).
 """
 
 import concurrent.futures
@@ -81,7 +82,7 @@ MUTANTS = [
          "    pthread_mutex_lock(&mixer_mutex);\n    set_locked(field, value);\n    ini_putl(field_ini[field].section, field_ini[field].key, mixer.value[field], SETTING_INI);")]),
     ("apply in the caller's thread", M, [("    if (worker_running)\n        pthread_cond_signal(&work_cond);",
                                           "    if (0)\n        pthread_cond_signal(&work_cond);")]),
-    ("no watcher", M, [("const int has = codec_has_last_batch(full);", "const int has = codec_has_last_batch(full) >= 0;")]),
+    ("no watcher", M, [("const int has = codec_has_last_batch();", "const int has = codec_has_last_batch() >= 0;")]),
     ("watcher: no backoff after the retries", M, [("#define AUDIO_MIXER_WATCH_RETRIES 3", "#define AUDIO_MIXER_WATCH_RETRIES 1000")]),
     ("review x3: ADC volume never written", R, [('    cset(&cb, "ADC volume", adc_volume);\n', "    (void)adc_volume;\n")]),
     ("review x4: HDMI level is not a headphone level", M, [
@@ -97,17 +98,23 @@ MUTANTS = [
         ("const int out_dac = connect && dac_on;", "const int out_dac = dac_on;")]),
     ("HDMI in: a level change switches the line out on", M, [
         ("        if (!line_out_by_source)\n            context.line_out = true;", "        context.line_out = true;")]),
-    ("watcher: quick pass reads every control", M, [
-        ("        if (!full && !is_reset_control(name))\n            continue;\n",
-         "        if (0 && !full && !is_reset_control(name))\n            continue;\n")]),
-    ("watcher: no full pass", M, [
-        ("const bool full = recheck_now || rechecking || backoff || ++pass >= AUDIO_MIXER_WATCH_FULL;",
-         "const bool full = recheck_now || rechecking || backoff || (++pass >= AUDIO_MIXER_WATCH_FULL && 0);")]),
-    ("watcher: quick pass misses the line out volume", M, [('"MIC1 boost AMP gain control", "ADC input gain control", "ADC volume",',
-                                                            '"MIC1 boost AMP gain control", "ADC input gain control", "ADC volume", "x",'),
-                                                           ('"LADC input Mixer MIC1 boost Switch", "lineout volume", "DAC volume",',
-                                                            '"LADC input Mixer MIC1 boost Switch", "DAC volume",')]),
-    ("watcher: recheck ignored", M, [("    recheck_now = true;\n", "")]),
+    # ---- juricabi.4: the watcher reads the codec only while something may have changed it (the
+    # 250 ms watcher of juricabi.2 / .3 clicked in every DVR recording)
+    ("watcher: reads the codec all the time (the clicks of juricabi.2 / .3)", M, [
+        ("                if (!recheck_now && !unverified && !backoff && mono_ms() >= recheck_until_ms)\n"
+         "                    continue; // nothing may have changed the codec: leave it alone\n", "")]),
+    ("watcher: keeps reading after the codec has the batch", M, [
+        ("                backoff = 0;\n                unverified = false;\n", "                backoff = 0;\n")]),
+    ("watcher: an apply not checked", M, [("        apply_latest();\n        unverified = true;\n", "        apply_latest();\n")]),
+    ("watcher: a record daemon start not noticed", M, [
+        ("    if (pid <= 0 || pid == *seen)\n", "    if (1 || pid <= 0 || pid == *seen)\n")]),
+    ("watcher: the daemon running at boot taken as already looked at", M, [
+        ("    int daemon = 0;          // the record daemon's pid at the last look (0: none seen yet)\n",
+         "    int daemon = audio_mixer_record_daemon_pid();\n")]),
+    ("watcher: a pass reads only part of the batch", M, [
+        ("        codec_reads++;\n", "        if (strstr(name, \"MIC2\"))\n            continue;\n        codec_reads++;\n")]),
+    ("watcher: recheck ignored", M, [("    recheck_now = true;\n    pthread_cond_signal(&work_cond);",
+                                      "    pthread_cond_signal(&work_cond);")]),
     ("watcher: stops for good when the codec cannot be read", M, [
         ("                unreadable = true;\n                backoff = next_backoff(backoff);",
          "                unreadable = true;\n                backoff = 1000000;")]),

@@ -136,11 +136,11 @@ void audio_mixer_hold(audio_mixer_holder_t holder, bool hold);
 size_t audio_mixer_build_held_commands(char *buf, size_t size);
 
 // The record daemon is (re)started now or within a few seconds (Storage page scripts): compare the
-// whole codec at once and every 50 ms for the next 6 s.
+// whole codec at once and every 50 ms for the next 6 s. The worker does the same by itself when the
+// daemon's pid file changes (audio_mixer_record_daemon_pid()).
 void audio_mixer_recheck(void);
-// Host test: codec controls read by the watcher so far, and the controls of the quick pass.
+// Host test: codec controls read by the watcher so far.
 unsigned audio_mixer_codec_reads(void);
-bool audio_mixer_is_reset_control(const char *name);
 
 // Line out allowed (an analog source) or muted (HDMI in), as ripples' dvr_enable_line_out(). At
 // boot it is muted until the first call with true, like ripples' firmware that left the record
@@ -187,6 +187,9 @@ bool audio_mixer_batch_value(const char *batch, const char *name, int *value);
 
 // Read one control of the codec (audio_mixer_codec.c): 0 = ok, -1 = not available.
 int audio_mixer_codec_read(const char *name, int *value);
+// The record daemon's pid from its pid file, which it writes as it starts, right before its
+// AW_MPI_SYS_Init() (audio_mixer_codec.c); 0: none (no daemon yet, the file being written, emulator).
+int audio_mixer_record_daemon_pid(void);
 
 #ifdef __cplusplus
 }

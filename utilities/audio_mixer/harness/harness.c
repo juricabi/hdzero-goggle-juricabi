@@ -17,7 +17,7 @@
  *   amixer_fail <n>        the next n amixer runs fail (exit status 1, the codec unchanged)
  *   codec_fail <0|1>       reading the codec's controls fails (no ALSA device, emulator)
  *   reads                  prints READS <controls read by the watcher so far> <amixer runs so far>
- *   reset_control <name>   prints RESETCTL <0|1>: is it read by the watcher's quick pass
+ *   recorder <pid>         the record daemon's pid file now holds <pid> (a daemon started; 0: none)
  *   recheck                audio_mixer_recheck() (the record daemon is being restarted)
  *   apply | save | wait | rx | dump | unsaved | preset | mark (prints MARK)
  *   set <key> <value> | get <key> | set_live <value> | set_source <value>
@@ -60,6 +60,7 @@ static int amixer_runs;
 static char stuck_name[64];
 static int stuck_value;
 static int hold_before_batch; // the next batch: hold() taken right before it (atomic)
+static int recorder_pid;      // the record daemon's pid file (atomic); 0: no daemon
 
 static struct {
     char name[64];
@@ -116,6 +117,10 @@ int audio_mixer_codec_read(const char *name, int *value) {
     }
     pthread_mutex_unlock(&codec_mutex);
     return result;
+}
+
+int audio_mixer_record_daemon_pid(void) {
+    return __atomic_load_n(&recorder_pid, __ATOMIC_SEQ_CST);
 }
 
 int log_printf(const char *file, const char *func, int line, const int level, const char *fmt, ...) {
@@ -267,8 +272,8 @@ int main(void) {
             const int runs = amixer_runs;
             pthread_mutex_unlock(&codec_mutex);
             out("READS %u %d\n", audio_mixer_codec_reads(), runs);
-        } else if (strncmp(line, "reset_control ", 14) == 0) {
-            out("RESETCTL %d\n", audio_mixer_is_reset_control(line + 14));
+        } else if (sscanf(line, "recorder %d", &value) == 1) {
+            __atomic_store_n(&recorder_pid, value, __ATOMIC_SEQ_CST);
         } else if (strcmp(line, "recheck") == 0) {
             audio_mixer_recheck();
         } else if (strcmp(line, "apply") == 0) {

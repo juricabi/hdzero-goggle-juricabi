@@ -1,10 +1,11 @@
 /*
- * Audio mixer: read-back of the codec's mixer controls.
+ * Audio mixer: read-back of the codec's mixer controls, and the record daemon's pid.
  *
  * Straight from the ALSA control device with two ioctls, no process: the mixer's worker
- * compares the codec with the last batch every few seconds and applies again when someone
- * else has changed it, e.g. libmedia_mpp's AW_MPI_SYS_Init() when the record daemon
- * (re)starts or a DVR file is played (docs/audio.md).
+ * compares the codec with the last batch after an apply and when the record daemon has
+ * (re)started, whose libmedia_mpp AW_MPI_SYS_Init() resets part of the mixer, and applies
+ * again when someone else has changed it (docs/audio.md). Not all the time: a read touches
+ * the codec's analog registers, which clicks in a recording.
  */
 
 #include "audio_mixer.h"
@@ -12,6 +13,7 @@
 #ifndef EMULATOR_BUILD
 
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <time.h> // struct timespec, used by sound/asound.h
@@ -20,6 +22,8 @@
 #include <sound/asound.h>
 
 #include <log/log.h>
+
+#include "record/record_definitions.h" // LOCKFILE, the record daemon's pid file
 
 // The card amixer writes to: there is no asound.conf, so "default" is card 0 (audiocodec).
 #define CODEC_CTL_DEVICE "/dev/snd/controlC0"
@@ -110,13 +114,28 @@ int audio_mixer_codec_read(const char *name, int *value) {
     }
 }
 
+int audio_mixer_record_daemon_pid(void) {
+    // src/record/main.c already_running(): ftruncate(), then the pid as text
+    char buf[16] = {0};
+    const int fd = open(LOCKFILE, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    const ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    return n > 0 ? atoi(buf) : 0;
+}
+
 #else
 
-// The emulator has no codec to watch.
+// The emulator has no codec to watch and no record daemon.
 int audio_mixer_codec_read(const char *name, int *value) {
     (void)name;
     (void)value;
     return -1;
+}
+
+int audio_mixer_record_daemon_pid(void) {
+    return 0;
 }
 
 #endif

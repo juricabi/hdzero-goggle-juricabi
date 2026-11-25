@@ -214,15 +214,29 @@ AIF1DA0L`, `Left Output Mixer DACL`, `AIF1 AD0L Mixer ADCL` and `LADC input Mixe
 `lineout volume` 27, `DAC volume` 160, `LINEOUTL/R Mux` OMIX_LR_SUM, `MIC1 boost AMP gain control` 4,
 `ADC input gain control` 3 and `ADC volume` 160. It runs when the record daemon starts (rc.sh;
 chkfixsd.sh / formatsd.sh: the automatic SD check after boot, the SD repair and format of the Storage
-page) and in the app for every DVR file played. The mixer's worker watches the codec: while it has
-nothing to apply, it reads the codec back every 250 ms, straight from `/dev/snd/controlC0` with ALSA
-control ioctls (`audio_mixer_codec.c`, no process). Each pass reads the 12 controls of the reset; every
-8th pass (2 s) reads every control of the last batch. It applies the current state again as soon as
-one differs (log: `codec changed by someone else`). After the Storage page's SD repair or format
-(`audio_mixer_recheck()`) it looks at once and then every 50 ms for 6 s. A codec that does not keep a
-value, one that cannot be read, or an amixer that fails is logged and retried with a backoff (2 s,
-doubling, at most 60 s); the mixer never gives up. It does not watch while it is held (playback, a
-test). The emulator has no codec, so it does not watch.
+page) and in the app for every DVR file played (the mixer is held then, below).
+
+The mixer's worker reads the codec back, straight from `/dev/snd/controlC0` with ALSA control ioctls
+(`audio_mixer_codec.c`, no process), and applies the current state again as soon as a control differs
+from the last batch (log: `codec changed by someone else`). A pass reads every control of the batch.
+It reads only while something may have changed the codec:
+
+* once, 250 ms after every batch it writes (does the codec keep it?);
+* in a recheck window: a pass at once, then every 50 ms for 6 s. One opens when the record daemon has
+  started, which the worker sees in the daemon's pid file `/tmp/record.pid` (written as the daemon
+  starts, right before its `AW_MPI_SYS_Init()`; the worker looks at the file every 250 ms, which does not
+  touch the codec). That covers the daemon started at boot (the first look after the app starts), the
+  SD check after boot and after a card is inserted, and the Storage page's repair and format. The
+  Storage page also opens one itself (`audio_mixer_recheck()`);
+* while a failure is retried: a codec that does not keep a value, one that cannot be read, or an amixer
+  that fails is logged and retried with a backoff (2 s, doubling, at most 60 s); the mixer never gives up.
+
+Otherwise it reads nothing. **Reading the codec is not silent**: about half of the controls are the
+codec's analog registers (`read_prcm_wvalue()` of `sun8iw16-codec.c`), and juricabi.2 and juricabi.3,
+whose worker read the codec every 250 ms all the time, put a short full-scale click into every DVR
+recording 4 times a second (found in the owner's `hdz_0014.ts` of 2026-11-25: clicks 250 to 251 ms
+apart, about 10 samples long, in both channels, not on the AAC frame grid). It does not watch while it
+is held (playback, a test). The emulator has no codec and no record daemon, so it does not watch.
 
 The mixer is the only part of the firmware that writes these controls, apart from ripples' playback and
 test code while it is held. The HDMI-in audio code tells the mixer (`audio_mixer_set_live_dac()`) instead
@@ -301,7 +315,8 @@ differs:
 
 * The page itself (above). ripples' Audio Source and Live Volume rows are gone; their keys stay.
 * The record daemon's mixer reset (boot, SD check, SD format): ripples kept it until the next source
-  switch or recording start; now it is undone within about 2 s. Booting straight into HDZero, the line
+  switch or recording start; now it is undone within about half a second of the daemon's start (2 s in
+  juricabi.2 and .3). Booting straight into HDZero, the line
   out is switched off instead of left on with nothing audible connected (silent either way).
 * Headphone Volume 0: ripples left the line out switch on at volume 0; now it is off (silent either way).
 * The preamps and the ADC input gain are always set. ripples set them only for the selected source, so
@@ -352,8 +367,11 @@ The host tests cover the routing logic; these need the hardware.
    "Nothing recorded: audio input busy" (or records: then note it).
 7. DVR playback: as on ripples (left channel, DVR Playback volume), also with Mic or Line In heard on the
    page: neither is heard with the file. After it the live sources come back.
-8. Record daemon reset: start a recording after an SD repair or format on the Storage page. Within about
-   2 s the log shows `codec changed by someone else`, and `amixer contents` matches `/tmp/audio_mixer.cmd`.
+8. Record daemon reset: start a recording after an SD repair or format on the Storage page. The log
+   shows `record daemon <pid> started` and `codec changed by someone else`, and `amixer contents` matches
+   `/tmp/audio_mixer.cmd`.
+9. No clicks: record 10 s or more of a steady sound (Mic or Line In recorded) without touching the Audio
+   page. The file has no click 4 times a second (juricabi.2 and .3 had: the watcher of every 250 ms).
 
 ## Checking without hardware
 
@@ -384,7 +402,8 @@ graph made of the driver's DAPM routes. It asserts:
   routed it.
 * headphones at boot, transitions (a change never drops the line out, the ADC's source or a recorded
   input in between), the worker (never blocks, coalesces, writes setting.ini only on save, clamps), hold,
-  the watcher, and a record daemon restart while the line out is off.
+  the watcher (and that it reads nothing while nothing can have changed the codec), and a record daemon
+  restart while the line out is off.
 
 `--driver <BSP>/sound/soc/sunxi/sun8iw16-codec.c` also checks that every modelled route is one of the
 driver's. `utilities/audio_mixer/mutants.py` applies small mutations to a copy of the sources and fails

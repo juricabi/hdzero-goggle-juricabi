@@ -33,7 +33,10 @@ For every target (Goggle, Goggle 2, BoxPro):
   hold        ripples' DVR playback and test paths while held: no headphone source of the page heard
               with the file, a test records only its source, the AIF1 DAC timeslot volumes back
               afterwards; two holders (playback and a test) hold independently
-  watcher     a libmedia_mpp reset after the routing is undone; the cost of a pass; a control the
+  watcher     the codec is read only while something may have changed it: once after an apply
+              (every control of the batch), in a recheck window (a record daemon start, also the
+              one running at boot; audio_mixer_recheck()); otherwise nothing at all (a read clicks
+              in the recording); a libmedia_mpp reset after a daemon start is undone; a control the
               codec does not keep, a codec that cannot be read, an amixer that fails: retried
               with a backoff, never a loop, never given up; recheck looks at once; not while held
   daemon restart  while the line out is off (stock boot state, HDMI in, Headphone Volume 0) a
@@ -73,7 +76,7 @@ LOOPBACKS = ["AIF1 AD0L Mixer AIF1 DA0L Switch", "AIF1 AD0R Mixer AIF1 DA0R Swit
 DUMP = os.path.join(ROOT, "mkapp/app/app/record/audio/audiocodec/alsa-util/amixer-record.txt")
 AUDIO_SEL = os.path.join(ROOT, "mkapp/app/script/audio_sel.sh")
 WATCH_MS = 50  # the harness's watcher period (firmware: 250)
-WATCH_FULL = 8  # every 8th pass reads every control (AUDIO_MIXER_WATCH_FULL)
+RECHECK_WINDOW = WATCH_MS * 24  # a recheck window (AUDIO_MIXER_RECHECK_WINDOW)
 # output mixer gain of each analog source, and its switches
 OUTPUT_GAIN = {"mic": ("MIC1_G boost stage output mixer control", "Left Output Mixer MIC1Booststage Switch"),
                "line_in": ("MIC2 BST stage to L_R outp mixer gain", "Left Output Mixer MIC2Booststage Switch"),
@@ -757,8 +760,9 @@ def new_firmware(h, ini, flow):
     lines = START + ["apply"]  # main.c
     if flow == "late_reset":
         lines = codec_lines(base_codec(h.target, libmedia=False)) + lines + ["wait", "wait", "line_out 1", "wait"]
-        # the record daemon initialises after the app has routed (boot race, SD check, format)
-        lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 8}"]
+        # the record daemon initialises after the app has routed (boot race, SD check, format): its
+        # pid file, then its reset
+        lines += [f"sleep {WATCH_MS * 3}", "recorder 2"] + codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 8}"]
     else:
         lines = codec_lines(base_codec(h.target)) + lines
         if flow in ("switch", "hdmi"):
@@ -931,7 +935,7 @@ def test_hold(h):
     values = direct_only(rec_mic=1, av=8, live_audio_volume=10)
     lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "mark", "hold_test 1", "hold 1",
                                                          "hold_test 0", "set mic 3", "apply"]
-    lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * (WATCH_FULL + 4)}", "mark", "hold 0", "mark", "dump"]
+    lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 12}", "mark", "hold 0", "mark", "dump"]
     batches, _, _, _, _ = h.run(mixer_ini(values), lines)
     during = batches[h.marks[0]:h.marks[1]]
     on_release = h.marks[2] - h.marks[1]
@@ -1029,12 +1033,12 @@ def test_worker(h):
         ok(test)
 
     # hold: ripples' playback / a test drives the codec; nothing written meanwhile (also not by the
-    # watcher, whatever ripples' code sets), the state applied on release, then watched again
+    # watcher, whatever ripples' code sets), the state applied on release, then checked once more
     test = f"{h.target} hold"
     lines = codec_lines(base_codec(h.target)) + START + ["wait", "line_out 1", "wait", "dump", "mark", "hold 1",
                                                          "set mic 5", "apply", "wait", "line_out 0", "line_out 1"]
     lines += codec_lines(dict(cm.LIBMEDIA_RESET, **{"Left Output Mixer LINEINL Switch": 0, "Right Output Mixer LINEINR Switch": 0}))
-    lines += [f"sleep {WATCH_MS * (WATCH_FULL + 4)}", "mark", "hold 0", "mark", "dump",
+    lines += [f"sleep {WATCH_MS * 12}", "mark", "hold 0", "mark", "dump",
               "codec lineout volume=27", f"sleep {WATCH_MS * 3}", "mark"]
     batches, queries, codec, _, _ = h.run(mixer_ini(direct_only(rec_av=1, av=8, live_audio_volume=10)), lines)
     during = batches[h.marks[0]:h.marks[1]]
@@ -1067,18 +1071,39 @@ def test_worker(h):
 
 
 def test_watcher(h):
-    test = f"{h.target} watcher"
+    # a record daemon starts (its pid file), then its AW_MPI_SYS_Init resets part of the mixer: undone.
+    # Also the daemon that already runs when the app starts (boot): its window opens at the first look.
     values = direct_only(rec_line_in=1, av=8, live_audio_volume=10)
-    lines = codec_lines(base_codec(h.target, libmedia=False)) + START + ["wait", "dump", "mark"]
-    lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 8}", "dump"]
-    batches, _, _, log, _ = h.run(mixer_ini(values), lines)
-    before, after = h.dumps[0], h.dumps[-1]
-    reapplied = len(batches) - h.marks[0]
-    if after != before or reapplied != 1 or "codec changed by someone else" not in log:
-        fail(test, f"reset not undone: {reapplied} batches, "
-                   f"differences {sorted(k for k in after if after[k] != before.get(k))}")
-    else:
-        ok(test)
+    for name, before_start, restart in (("record daemon start", [], ["recorder 2"]),
+                                        ("record daemon running at boot", ["recorder 7"], [])):
+        test = f"{h.target} watcher, {name}"
+        lines = codec_lines(base_codec(h.target, libmedia=False)) + before_start + START + ["wait", f"sleep {WATCH_MS * 3}",
+                                                                                              "dump", "mark"]
+        lines += restart + codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 8}", "dump"]
+        batches, _, _, log, _ = h.run(mixer_ini(values), lines)
+        before, after = h.dumps[0], h.dumps[-1]
+        reapplied = len(batches) - h.marks[0]
+        if after != before or reapplied != 1 or "codec changed by someone else" not in log or "record daemon" not in log:
+            fail(test, f"reset not undone: {reapplied} batches, "
+                       f"differences {sorted(k for k in after if after[k] != before.get(k))}")
+        else:
+            ok(test)
+
+    # the clicks of juricabi.2 / .3: nothing may be read while nothing can have changed the codec (after
+    # the apply's one pass over every control of the batch, and after the boot daemon's window)
+    for name, before_start, settle in (("after an apply", [], WATCH_MS * 3),
+                                       ("after the boot daemon's window", ["recorder 7"], RECHECK_WINDOW + WATCH_MS * 3)):
+        test = f"{h.target} watcher, idle {name}: the codec is not read"
+        lines = codec_lines(base_codec(h.target, libmedia=False)) + before_start + START + ["wait", f"sleep {settle}", "reads",
+                                                                                              f"sleep {WATCH_MS * 32}", "reads"]
+        batches, queries, _, _, _ = h.run(mixer_ini(values), lines)
+        (r0, a0), (r1, a1) = [tuple(int(x) for x in q.split()[1:]) for q in query(queries, "READS ")]
+        if r1 != r0 or a1 != a0 or len(batches) != 1:
+            fail(test, f"{r1 - r0} controls read and {a1 - a0} amixer runs in {WATCH_MS * 32} ms with nothing changed")
+        elif not before_start and r0 != len(batches[0]):
+            fail(test, f"{r0} controls read after the apply, want one pass over the batch's {len(batches[0])}")
+        else:
+            ok(test)
 
     test = f"{h.target} watcher, control the codec does not keep"
     lines = codec_lines(base_codec(h.target, libmedia=False)) + ["stuck lineout volume=27"] + START + ["wait",
@@ -1093,32 +1118,15 @@ def test_watcher(h):
     else:
         ok(test)
 
-    # the cost of a pass: the quick pass reads only the controls a libmedia_mpp reset writes, every
-    # 8th pass all of them; no amixer while the codec keeps the routing
-    test = f"{h.target} watcher, cost of a pass"
-    lines = codec_lines(base_codec(h.target, libmedia=False)) + START + ["wait", "sleep 20", "reads",
-                                                                         f"sleep {WATCH_MS * 32 + 20}", "reads"]
-    lines += [f"reset_control {n}" for n, _ in cm.LIBMEDIA_RESET] + ["reset_control Right Output Mixer LINEINR Switch"]
-    batches, queries, _, _, _ = h.run(mixer_ini(values), lines)
-    (r0, a0), (r1, a1) = [tuple(int(x) for x in q.split()[1:]) for q in query(queries, "READS ")]
-    per_pass = (r1 - r0) / 32
-    resetctl = [int(q.split()[1]) for q in query(queries, "RESETCTL ")]
-    if a1 != a0 or len(batches) != 1:
-        fail(test, f"amixer ran {a1 - a0} times while the codec kept the routing")
-    elif not 10 <= per_pass <= 17:  # 12 per quick pass, about 36 every 8th: 15 on average
-        fail(test, f"{per_pass:.1f} controls read per pass")
-    elif resetctl != [1] * len(cm.LIBMEDIA_RESET) + [0]:
-        fail(test, f"the quick pass's controls are not codec_model.LIBMEDIA_RESET: {resetctl}")
-    else:
-        ok(test)
-
-    # a change of a control the quick pass does not read: found by the full pass (8 periods), and
-    # at once after audio_mixer_recheck()
-    for name, recheck, within in (("full pass", False, WATCH_MS * (WATCH_FULL + 2)), ("recheck", True, WATCH_MS)):
+    # a control that no libmedia_mpp reset writes, changed: every pass reads the whole batch, the one
+    # after an apply, the one at once after audio_mixer_recheck() and the one after a daemon start
+    for name, idle, trigger, within in (("after an apply", [], [], WATCH_MS * 2),
+                                        ("recheck", [f"sleep {WATCH_MS * 3}"], ["recheck"], WATCH_MS),
+                                        ("record daemon start", [f"sleep {WATCH_MS * 3}"], ["recorder 5"], WATCH_MS * 2 + 30)):
         test = f"{h.target} watcher, other control changed, {name}"
-        lines = codec_lines(base_codec(h.target, libmedia=False)) + START + ["wait", "mark",
-                                                                             "codec RADC input Mixer MIC2 boost Switch=0"]
-        lines += (["recheck"] if recheck else []) + [f"sleep {within}", "mark", "dump"]
+        lines = codec_lines(base_codec(h.target, libmedia=False)) + START + ["wait"] + idle + [
+            "mark", "codec RADC input Mixer MIC2 boost Switch=0"]
+        lines += trigger + [f"sleep {within}", "mark", "dump"]
         batches, _, codec, _, _ = h.run(mixer_ini(values), lines)
         if h.marks[1] - h.marks[0] != 1 or codec.get("RADC input Mixer MIC2 boost Switch") != 1:
             fail(test, f"{h.marks[1] - h.marks[0]} batches within {within} ms")
@@ -1141,7 +1149,7 @@ def test_watcher(h):
     lines = codec_lines(base_codec(h.target, libmedia=False)) + START + ["wait", "codec_fail 1", "sleep 20", "reads",
                                                                          f"sleep {WATCH_MS * 40}", "reads", "codec_fail 0",
                                                                          f"sleep {WATCH_MS * 40}", "mark"]
-    lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 4}", "mark"]
+    lines += ["recorder 3"] + codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 4}", "mark"]
     batches, queries, _, log, _ = h.run(mixer_ini(values), lines)
     (r0, _), (r1, _) = [tuple(int(x) for x in q.split()[1:]) for q in query(queries, "READS ")]
     if log.count("cannot read the codec") != 1 or "has the routing" not in log:
@@ -1178,7 +1186,8 @@ def test_watcher(h):
 def test_daemon_restart(h):
     """The record daemon's AW_MPI_SYS_Init switches the line out on at 27 (SD check at boot, card
     insertion, SD repair / format). While the mixer has the line out off, nothing may then be heard
-    that the recording of the mix does not need; the watcher puts the routing back within two periods."""
+    that the recording of the mix does not need; the watcher, which sees the daemon's new pid file,
+    puts the routing back within two periods."""
     for audio_source in (0, 1, 2):
         old = migration_spec(audio_source)
         for name, values, start in (
@@ -1190,8 +1199,9 @@ def test_daemon_restart(h):
                 ("HDMI in audio, Headphone Volume 0, nothing recorded", dict(old, rec_mic=0, rec_line_in=0, rec_av=0, hdmi=4, live_audio_volume=0),
                  ["line_out 0", "live_dac 1"])):
             test = f"{h.target} daemon restart, Audio Source {audio_source}, {name}"
-            lines = codec_lines(base_codec(h.target)) + START + ["apply", "wait"] + start + ["wait", "dump", "mark"]
-            lines += codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 2 + 30}", "mark", "dump"]
+            lines = codec_lines(base_codec(h.target)) + START + ["apply", "wait"] + start + ["wait", f"sleep {WATCH_MS * 3}",
+                                                                                              "dump", "mark"]
+            lines += ["recorder 9"] + codec_lines(dict(cm.LIBMEDIA_RESET)) + [f"sleep {WATCH_MS * 2 + 30}", "mark", "dump"]
             batches, _, _, _, _ = h.run(mixer_ini(values), lines)
             before, after = h.dumps[0], h.dumps[-1]
             dac = "live_dac 1" in start

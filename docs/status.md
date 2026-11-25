@@ -33,6 +33,32 @@ module bay; its docs/status.md has the history and the reviews), stays in jurica
 Local worktree on the developer's machine (WSL): `/root/hdz/goggle-ripples` (branch `juricabi-122`, pushed as
 `main`; the local branch `juricabi` there is juricabi.1's).
 
+## juricabi.4 (not released: a test image for the owner's Goggle 1)
+
+juricabi.3 plus one fix: **no more clicks in the DVR's sound.**
+
+* **Found by the owner on 2026-11-25:** "I hear some clicks" in a DVR file (`hdz_0014.ts`, the owner's
+  quad on HDZero, recorded with juricabi.3; the files' dates are the goggle's unset clock). Measured on the
+  PC: AAC-LC 48 kHz stereo with clean timestamps (no gap, no jump); in the sound, a click every **250 to 251
+  ms** in both channels, about 10 samples (0.2 ms) of near full-scale values, not on the AAC frame grid
+  (so in the PCM the encoder got); `hdz_0012.ts` and `hdz_0013.ts` the same.
+* **Cause:** the mixer's watcher (since juricabi.2, d93241b): while the mixer had nothing to apply, it read
+  the codec's controls back every 250 ms (12 per pass, every control of the batch every 8th). About half of
+  them are the codec's analog registers, read through its PR interface (`read_prcm_wvalue()` of
+  `sun8iw16-codec.c`). The click period is the watcher's: the 250 ms wait plus the pass. Which read clicks
+  was not measured on the goggle; the fix stops all of them while recording.
+* **Fix** (`src/core/audio_mixer.c`, `audio_mixer_codec.c`; docs/audio.md, "libmedia_mpp resets part of the
+  mixer"): the worker reads the codec only while something may have changed it: once after every batch it
+  writes; in a recheck window (a pass at once, then every 50 ms for 6 s) when the record daemon has started,
+  which it sees in the daemon's pid file `/tmp/record.pid` (written as the daemon starts, before its
+  `AW_MPI_SYS_Init()`; looked at every 250 ms, which does not touch the codec), so the daemon of boot, the SD
+  check after boot or a card insertion and the Storage page's repair and format are all covered; and while a
+  failure is retried. Otherwise nothing. Every pass now reads the whole batch (the quick pass of the 12 reset
+  controls had no use left and is gone). DVR playback and the test buttons hold the mixer, as before.
+* What changes besides: the record daemon's reset is undone within about half a second of its start (was
+  up to 2 s); a change of the codec by anything else than a daemon start, playback or a test (nothing in
+  this firmware does that) is no longer noticed.
+
 ## juricabi.3
 
 juricabi.2 plus what a review of its changes found, plus four of ripples' fixes from its `main`. Released on
