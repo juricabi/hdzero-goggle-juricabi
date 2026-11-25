@@ -1,14 +1,14 @@
 # juricabi's HDZero goggle firmware
 
 juricabi's firmware is built on [ripples' Custom HDZero Goggles Firmware](https://github.com/LVTY-AI/hdzero-goggle)
-1.2.2 (the release, tag `ripples-v1.2.2`), with the additions below: version `1.2.2-juricabi.3` = ripples' 1.2.2
-plus juricabi's changes, number 3. It is **not** an official ripples or HDZero release, and ripples' testing of
+1.2.2 (the release, tag `ripples-v1.2.2`), with the additions below: version `1.2.2-juricabi.4` = ripples' 1.2.2
+plus juricabi's changes, number 4. It is **not** an official ripples or HDZero release, and ripples' testing of
 1.2.2 does not cover these additions. Goggle 1, Goggle 2 and BoxPro.
 
-**Status: released (`1.2.2-juricabi.3`).** juricabi.2 runs on one Goggle 1. juricabi.3 is juricabi.2 with the
-fixes of a code review and four of ripples' fixes; it passed its host tests and the emulator on all three targets
-and had not run on a goggle when it was released. The Goggle 2 and BoxPro images are built from the same code
-and have not run on hardware ([docs/status.md](docs/status.md)). Flash it only if you can go back ([docs/first-flash.md](docs/first-flash.md)).
+**Status: released (`1.2.2-juricabi.4`).** juricabi.4 runs on one Goggle 1. It is juricabi.3 with one fix: no more
+clicks in the DVR's sound (juricabi.2 and .3 put one into every recording 4 times a second); its owner flew it
+and found the clicks gone. The Goggle 2 and BoxPro images are built from the same code and have not run on
+hardware ([docs/status.md](docs/status.md)). Flash it only if you can go back ([docs/first-flash.md](docs/first-flash.md)).
 
 ## What it adds to ripples 1.2.2
 
@@ -45,8 +45,8 @@ and have not run on hardware ([docs/status.md](docs/status.md)). Flash it only i
 ## Flash, go back, build
 
 * **Images**: on this repository's Releases page, one per goggle, each with its `.sha256`:
-  `HDZERO_GOGGLE-77-206-1.2.2-juricabi.3.bin`, `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.3.bin`,
-  `HDZERO_BOXPRO-77-211-1.2.2-juricabi.3.bin`. The Firmware page shows the version as `juricabi.3 ripples 1.2.2`.
+  `HDZERO_GOGGLE-77-206-1.2.2-juricabi.4.bin`, `HDZERO_GOGGLE2-77-198-1.2.2-juricabi.4.bin`,
+  `HDZERO_BOXPRO-77-211-1.2.2-juricabi.4.bin`. The Firmware page shows the version as `juricabi.4 ripples 1.2.2`.
 * **Flash and go back**: [docs/first-flash.md](docs/first-flash.md): what to keep before you flash (ripples'
   official 1.2.2 and the HDZero recovery package), the SD card, the flash from the menu, the checks in their order
   (the untouched goggle, the Audio page, the DVR, Stream Audio, the probe and HDMI audio only on a GO, then the

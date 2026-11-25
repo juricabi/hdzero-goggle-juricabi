@@ -1,14 +1,14 @@
-# Status of juricabi's firmware, and how to continue (2026-11-20)
+# Status of juricabi's firmware, and how to continue (2026-11-25)
 
-juricabi's firmware (version `1.2.2-juricabi.3`) carries this project's additions on top of **ripples' custom
+juricabi's firmware (version `1.2.2-juricabi.4`) carries this project's additions on top of **ripples' custom
 firmware 1.2.2** (LVTY-AI/hdzero-goggle, the release: tag `ripples-v1.2.2`, 3f0461f, "1.2.2-ripples", MIT, by
 JustinRipley), which the owner prefers as the base. ripples' history is upstream HDZero's with rewritten hashes (no
 merge base with upstream a85841d), so the additions are **ported** from `all` (082b2f5), not merged.
-**juricabi.3 runs on the owner's Goggle 1** (flashed and tested by the owner on 2026-11-20; the verdict: good).
-It is juricabi.2 with the fixes of a code review and four of ripples' fixes (section "juricabi.3"); it had not
-run on a goggle when it was released. juricabi.2 ran on that goggle before it (the owner's verdict: all good);
-section "juricabi.2" has what was found there, what was checked and what was not. The Goggle 2 and BoxPro
-images are built from the same code and have not run on hardware.
+**juricabi.4 runs on the owner's Goggle 1** (flashed and flown by the owner on 2026-11-25: no more clicks in
+the DVR's sound). It is juricabi.3 with one fix (section "juricabi.4"). juricabi.3 ran on that goggle from
+2026-11-20 (the owner's verdict: good, but for the clicks, found on 2026-11-25), juricabi.2 before it; their
+sections have what was found there, what was checked and what was not. The Goggle 2 and BoxPro images are built
+from the same code and have not run on hardware.
 
 **Finished for now (owner, 2026-11-20).** The edge cases listed under "Open" are not tested and will not be
 soon, and the owner will not do the module bay mod: the module bay code stays untested on hardware.
@@ -33,9 +33,12 @@ module bay; its docs/status.md has the history and the reviews), stays in jurica
 Local worktree on the developer's machine (WSL): `/root/hdz/goggle-ripples` (branch `juricabi-122`, pushed as
 `main`; the local branch `juricabi` there is juricabi.1's).
 
-## juricabi.4 (not released: a test image for the owner's Goggle 1)
+## juricabi.4
 
-juricabi.3 plus one fix: **no more clicks in the DVR's sound.**
+juricabi.3 plus one fix: **no more clicks in the DVR's sound.** Released on 2026-11-25 at the owner's word after
+the owner had flown its test image (7e1fc4c, the same firmware code) on the Goggle 1: "no more problems with
+clicking". Measured on the owner's files: `hdz_0014.ts` (juricabi.3, 7 s) has 30 spikes, 25 of them 250 ms
+apart; `hdz_0015.ts` (juricabi.4, a 140 s flight) has 12 in all, none 250 ms apart (single sounds).
 
 * **Found by the owner on 2026-11-25:** "I hear some clicks" in a DVR file (`hdz_0014.ts`, the owner's
   quad on HDZero, recorded with juricabi.3; the files' dates are the goggle's unset clock). Measured on the
@@ -57,7 +60,21 @@ juricabi.3 plus one fix: **no more clicks in the DVR's sound.**
   controls had no use left and is gone). DVR playback and the test buttons hold the mixer, as before.
 * What changes besides: the record daemon's reset is undone within about half a second of its start (was
   up to 2 s); a change of the codec by anything else than a daemon start, playback or a test (nothing in
-  this firmware does that) is no longer noticed.
+  this firmware does that) is no longer noticed. On the goggle the log shows the boot daemon seen:
+  `audio mixer: record daemon 924 started, looking at the codec for 6000 ms`.
+
+Results of juricabi.4 (on the PC):
+
+| check | result |
+|---|---|
+| `test_mixer.py`, all three targets | all passed. New: the watcher reads nothing while nothing can have changed the codec (after an apply's one pass, and after the boot daemon's window); a daemon start and the daemon running at boot are undone; a control no reset writes is found after an apply, a recheck and a daemon start. Against juricabi.3's mixer the idle test fails (488 controls read in 1.6 s) |
+| `mutants.py` | the quick pass's three mutants out (no quick pass), six for the new watcher in; run after the tag (below) |
+| ripples' tests (`run_ripples_tests.sh`) | as for juricabi.3: all rc 0 but `record` (rc 2, `test_dvr_naming` does not build on glibc) |
+| emulator, all three targets | builds without a warning; the Firmware page shows `app: juricabi.4 ripples 1.2.2` (`keys/firmware_version.txt`, `EMU_APP_VERSION=1.2.2-juricabi.4`) |
+| `check_version.py`, with `--images` | all passed |
+| images, `build_all.sh` at the tag, Release with `-Werror` | no compiler warning (the `liblog.so` linker note only) |
+
+Not run again (their code did not change): the probe kit, the module bay tests, the live-stream audio suite.
 
 ## juricabi.3
 

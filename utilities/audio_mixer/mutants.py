@@ -101,8 +101,8 @@ MUTANTS = [
     # ---- juricabi.4: the watcher reads the codec only while something may have changed it (the
     # 250 ms watcher of juricabi.2 / .3 clicked in every DVR recording)
     ("watcher: reads the codec all the time (the clicks of juricabi.2 / .3)", M, [
-        ("                if (!recheck_now && !unverified && !backoff && mono_ms() >= recheck_until_ms)\n"
-         "                    continue; // nothing may have changed the codec: leave it alone\n", "")]),
+        ("                if (!recheck_now && !unverified && !backoff && mono_ms() >= recheck_until_ms)\n",
+         "                if (0 && !recheck_now && !unverified && !backoff && mono_ms() >= recheck_until_ms)\n")]),
     ("watcher: keeps reading after the codec has the batch", M, [
         ("                backoff = 0;\n                unverified = false;\n", "                backoff = 0;\n")]),
     ("watcher: an apply not checked", M, [("        apply_latest();\n        unverified = true;\n", "        apply_latest();\n")]),
